@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fraitmo-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - fraitmo-network
+
+  model-downloader:
+    image: ollama/ollama:latest
+    container_name: fraitmo-model-downloader
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    command: >
+      sh -c "
+        echo 'Waiting for Ollama to be ready...' &&
+        sleep 10 &&
+        echo 'Downloading llama3.1:8b model...' &&
+        ollama pull llama3.1:8b &&
+        echo 'Model downloaded successfully!'
+      "
+    networks:
+      - fraitmo-network
+
+  fraitmo:
+    build: .
+    container_name: fraitmo-app
+    depends_on:
+      - model-downloader
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./knowledge_base:/app/knowledge_base:ro
+      - ./test_data:/app/test_data:ro
+      - ./output:/app/output
+    working_dir: /app
+    command: python fraitmo.py
+    networks:
+      - fraitmo-network
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    driver: local
+
+networks:
+  fraitmo-network:
+    driver: bridge 
