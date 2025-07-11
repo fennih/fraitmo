@@ -1,0 +1,1 @@
+# Mitigation Proposal Node - Generates actionable mitigations with priority and implementation details 

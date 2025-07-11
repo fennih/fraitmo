@@ -32,8 +32,8 @@ services:
       sh -c "
         echo 'Waiting for Ollama to be ready...' &&
         sleep 10 &&
-        echo 'Downloading llama3.1:8b model...' &&
-        ollama pull llama3.1:8b &&
+        echo 'Downloading cogito:14b model...' &&
+        ollama pull cogito:14b &&
         echo 'Model downloaded successfully!'
       "
     networks:

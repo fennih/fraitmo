@@ -1,5 +1,5 @@
 """
-Ollama client optimized for RAG with llama3.1:8b
+Ollama client optimized for RAG with cogito:14b
 Handles model communication and response generation
 """
 
@@ -11,15 +11,15 @@ import time
 class OllamaRAGClient:
     """
     Ollama client specifically designed for RAG operations
-    Optimized for llama3.1:8b and threat modeling
+    Optimized for cogito:14b and threat modeling
     """
     
-    def __init__(self, model: str = "llama3.1:8b"):
+    def __init__(self, model: str = "cogito:14b"):
         """
         Initialize the Ollama RAG client
         
         Args:
-            model: Ollama model name (default: llama3.1:8b)
+            model: Ollama model name (default: cogito:14b)
         """
         self.model = model
         self.client = ollama.Client()

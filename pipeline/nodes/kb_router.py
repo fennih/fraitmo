@@ -1,0 +1,1 @@
+# Knowledge Base Router Node - Routes to AI vs General knowledge base based on component type 

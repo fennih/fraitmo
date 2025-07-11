@@ -1,0 +1,1 @@
+# AI Component Detector Node - Identifies AI/LLM/Agentic components in DFD diagrams 
