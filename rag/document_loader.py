@@ -28,27 +28,113 @@ def load_knowledge_base(kb_path: str = "knowledge_base") -> List[Dict]:
     
     json_files = list(kb_directory.glob("*.json"))
     
+    if not json_files:
+        print(f"⚠️ No JSON files found in: {kb_path}")
+        return docs
+    
+    loaded_files = 0
+    skipped_files = 0
+    
     for json_file in json_files:
         try:
+            # Check if file is empty first
+            if json_file.stat().st_size == 0:
+                print(f"⚠️ Skipping empty file: {json_file.name}")
+                skipped_files += 1
+                continue
+                
             with open(json_file, 'r', encoding='utf-8') as f:
                 content = json.load(f)
                 
-                # Skip empty files
-                if content:
-                    # If it's a list, extend
-                    if isinstance(content, list):
-                        docs.extend(content)
-                    # If it's a dict, add as single document
-                    elif isinstance(content, dict):
-                        docs.append(content)
+                # Skip empty/null content
+                if not content:
+                    print(f"⚠️ Skipping file with no content: {json_file.name}")
+                    skipped_files += 1
+                    continue
+                    
+                # If it's a list, extend
+                if isinstance(content, list):
+                    docs.extend(content)
+                # If it's a dict, add as single document
+                elif isinstance(content, dict):
+                    docs.append(content)
+                else:
+                    print(f"⚠️ Skipping file with unexpected format: {json_file.name}")
+                    skipped_files += 1
+                    continue
                         
-            print(f"✅ Loaded {json_file.name}")
+            loaded_files += 1
             
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSON parse error in {json_file.name}: {str(e)[:50]}...")
+            skipped_files += 1
         except Exception as e:
-            print(f"❌ Error loading {json_file.name}: {e}")
+            print(f"⚠️ Error loading {json_file.name}: {str(e)[:50]}...")
+            skipped_files += 1
     
-    print(f"📚 Total documents loaded: {len(docs)}")
+    # Clean summary
+    print(f"📚 Knowledge base loaded: {loaded_files} files, {len(docs)} documents")
+    if skipped_files > 0:
+        print(f"⚠️ Skipped {skipped_files} problematic files")
+    
     return docs
+
+
+def get_knowledge_base_stats(kb_path: str = "knowledge_base") -> Dict[str, any]:
+    """
+    Get statistics about the knowledge base
+    
+    Args:
+        kb_path: Path to the knowledge base directory
+        
+    Returns:
+        Dictionary with KB statistics
+    """
+    kb_directory = Path(kb_path)
+    
+    if not kb_directory.exists():
+        return {"error": f"Directory not found: {kb_path}"}
+    
+    json_files = list(kb_directory.glob("*.json"))
+    total_files = len(json_files)
+    valid_files = 0
+    empty_files = 0
+    corrupted_files = 0
+    total_documents = 0
+    
+    for json_file in json_files:
+        try:
+            if json_file.stat().st_size == 0:
+                empty_files += 1
+                continue
+                
+            with open(json_file, 'r', encoding='utf-8') as f:
+                content = json.load(f)
+                
+                if not content:
+                    empty_files += 1
+                    continue
+                    
+                valid_files += 1
+                
+                if isinstance(content, list):
+                    total_documents += len(content)
+                elif isinstance(content, dict):
+                    total_documents += 1
+                    
+        except json.JSONDecodeError:
+            corrupted_files += 1
+        except Exception:
+            corrupted_files += 1
+    
+    return {
+        "total_files": total_files,
+        "valid_files": valid_files,
+        "empty_files": empty_files,
+        "corrupted_files": corrupted_files,
+        "total_documents": total_documents,
+        "success_rate": f"{(valid_files/total_files*100):.1f}%" if total_files > 0 else "0%"
+    }
 
 
 def search_documents(docs: List[Dict], query: str, max_results: int = 5) -> List[Dict]:

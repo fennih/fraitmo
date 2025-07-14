@@ -1,6 +1,18 @@
 # Core dependencies
 pydantic>=2.0.0
 pathlib
+python-dotenv>=1.0.0
+
+# LangGraph ecosystem (latest versions)
+langgraph>=0.5.2
+langgraph-prebuilt>=0.5.2
+langchain>=0.3.0
+langchain-ollama>=0.3.0
+
+# LangGraph checkpointers for state persistence
+langgraph-checkpoint>=1.0.0
+langgraph-checkpoint-sqlite>=1.0.0  # For development/testing
+langgraph-checkpoint-postgres>=1.0.0  # For production (optional)
 
 # Ollama client (latest available version)
 ollama>=0.5.1
