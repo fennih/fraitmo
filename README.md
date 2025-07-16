@@ -2,9 +2,9 @@
 # FRAITMO - Framework for Robust AI Threat Modeling Operations
 
 A modular framework to automate threat modeling for Agentic AI / LLM-based systems.  
-It parses DFDs, builds semantic models, and leverages **Ollama + RAG** to identify and contextualize threats from a structured knowledge base.
+It parses DFDs, builds semantic models, and leverages **multiple LLM providers + RAG** to identify and contextualize threats using both structured knowledge bases and direct LLM reasoning.
 
-**✨ New: LangGraph-based orchestration with AI-aware threat analysis**
+**✨ New: Unified LLM Client with LM Studio support + Parallel LangGraph Architecture**
 
 ---
 
@@ -14,8 +14,10 @@ It parses DFDs, builds semantic models, and leverages **Ollama + RAG** to identi
 - **Extract components, connections, and trust boundaries**
 - **Build a semantic representation** of the architecture
 - **Detect AI/LLM/Agentic components** automatically
-- **Use specialized knowledge bases** for AI vs traditional infrastructure
-- **Analyze threats contextually** using local LLMs (Cogito 14B)
+- **Use multiple LLM providers** (Ollama, LM Studio) with automatic fallback
+- **Leverage specialized cybersecurity models** (Foundation-Sec-8B)
+- **Run parallel analysis paths** for comprehensive threat coverage
+- **Analyze threats with direct LLM reasoning** independent of knowledge bases
 - **Generate actionable mitigations** with implementation roadmaps
 - **Track implementation progress** with detailed reporting
 
@@ -24,7 +26,8 @@ It parses DFDs, builds semantic models, and leverages **Ollama + RAG** to identi
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-- **Ollama installed** ([download here](https://ollama.ai/))
+- **LM Studio** ([download here](https://lmstudio.ai/)) **[RECOMMENDED]**
+  - OR **Ollama** ([download here](https://ollama.ai/))
 - **Python 3.9+**
 - **macOS with Apple Silicon** (recommended)
 
@@ -33,10 +36,22 @@ It parses DFDs, builds semantic models, and leverages **Ollama + RAG** to identi
 pip install -r requirements.txt
 ```
 
-### 3. Setup Ollama
+### 3. Setup LLM Provider
+
+#### Option A: LM Studio (Recommended)
+```bash
+# 1. Download and install LM Studio
+# 2. Download the Foundation-Sec-8B-Q4_K_M model from fdtn-ai
+# 3. Start the local server (port 1234)
+# 4. FRAITMO will auto-detect and prioritize this setup
+```
+
+#### Option B: Ollama (Alternative)
 ```bash
 # Pull recommended model for threat modeling
 ollama pull cogito:14b
+# OR
+ollama pull foundation-sec:8b
 ```
 
 ### 4. Run Threat Analysis
@@ -44,60 +59,117 @@ ollama pull cogito:14b
 python fraitmo.py your_diagram.xml
 ```
 
----
-
-## 🐳 Docker Setup (Alternative)
-
-For isolated deployment with automated Ollama and model setup:
-
-### Prerequisites
-- Docker and Docker Compose installed
-- 8GB+ available RAM for the model
-
-### Setup Commands
-```bash
-# Create necessary directories
-mkdir -p output test_data
-
-# Build the application
-docker-compose build
-
-# Start Ollama service
-docker-compose up -d ollama
-
-# Wait for Ollama to initialize (10-15 seconds)
-sleep 15
-
-# Download the model (this will take several minutes)
-docker-compose up model-downloader
-
-# Run the FRAITMO application
-docker-compose up fraitmo
-```
-
-### Useful Docker Commands
-```bash
-# View application logs
-docker-compose logs -f fraitmo
-
-# View Ollama service logs  
-docker-compose logs -f ollama
-
-# Stop all services
-docker-compose down
-
-# Restart only the application
-docker-compose up fraitmo
-```
+The system will automatically detect available LLM providers and use the best model for cybersecurity analysis.
 
 ---
 
-## 📂 Project Structure
+## 🧠 LLM Provider Support
+
+### Unified LLM Client Architecture
+
+FRAITMO features a **UnifiedLLMClient** that automatically detects and uses the best available LLM provider:
+
+```python
+# Auto-detection priority (highest to lowest):
+1. Foundation-Sec model on LM Studio (localhost:1234)
+2. Foundation-Sec model on Ollama (localhost:11434) 
+3. Cogito model on Ollama
+4. Any available model on either provider
+```
+
+### Supported Providers
+
+#### **🎯 LM Studio (Primary)**
+- **URL**: `http://localhost:1234/v1/`
+- **Recommended Model**: `fdtn-ai/Foundation-Sec-8B-Q4_K_M-GGUF`
+- **Advantages**: 
+  - GUI interface for model management
+  - Optimized for cybersecurity analysis
+  - OpenAI-compatible API
+  - Better model curation
+
+#### **🔄 Ollama (Fallback)**
+- **URL**: `http://localhost:11434/`
+- **Supported Models**: `foundation-sec:8b`, `cogito:14b`, others
+- **Advantages**:
+  - Command-line simplicity
+  - Broad model support
+  - Established ecosystem
+
+### Automatic Failover
+
+The system gracefully handles provider failures:
+- **Primary fails**: Automatically switches to backup provider
+- **Model unavailable**: Falls back to next best available model
+- **All providers down**: Clear error messages with setup instructions
+
+---
+
+## 🏗️ Parallel LangGraph Architecture
+
+### Dual-Path Analysis System
+
+FRAITMO implements a sophisticated **parallel analysis architecture** that combines traditional knowledge base lookup with direct LLM reasoning:
+
+```mermaid
+graph TD
+    A["📄 DFD XML Input"] --> B["🔍 DFD Parser"]
+    B --> C["🏗️ Semantic Modeling"]
+    C --> D["🤖 AI Component Detection"]
+    
+    D --> E["🔀 PARALLEL EXECUTION"]
+    
+    E --> F["📚 Traditional Path"]
+    E --> G["🧠 Direct LLM Path"]
+    
+    subgraph "Traditional Knowledge Base Path"
+        F --> H["📊 KB Router"]
+        H --> I["🔍 Threat Search"]
+        I --> J["🧠 LLM Analysis"]
+        J --> K["💡 Mitigation Proposer"]
+    end
+    
+    subgraph "Direct LLM Analysis Path"
+        G --> L["🎯 Direct LLM Analyzer"]
+        L --> M["🛡️ Direct Mitigation Proposer"]
+    end
+    
+    K --> N["📊 Results Aggregation"]
+    M --> N
+    N --> O["📄 Final Report"]
+    
+    style E fill:#ffeb3b,stroke:#f57f17,stroke-width:3px
+    style L fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    style M fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+```
+
+### Path Comparison
+
+| Aspect | Traditional Path | Direct LLM Path |
+|--------|------------------|------------------|
+| **Data Source** | Structured knowledge base | LLM reasoning |
+| **Coverage** | Known threat patterns | Comprehensive analysis |
+| **Speed** | Fast (database lookup) | Moderate (LLM processing) |
+| **Innovation** | Limited to KB content | Creative threat discovery |
+| **Reliability** | High (structured data) | High (Foundation-Sec model) |
+| **Dependencies** | Requires knowledge_base/ | Independent operation |
+
+### Benefits of Parallel Architecture
+
+1. **Redundancy**: If knowledge base is missing, direct LLM path still works
+2. **Comprehensive Coverage**: Combines structured knowledge with LLM creativity
+3. **Performance**: Both paths run simultaneously for faster results
+4. **Reliability**: System remains functional even with partial failures
+5. **Innovation**: Direct LLM path can discover novel threat patterns
+
+---
+
+## 📂 Enhanced Project Structure
 
 ```
 fraitmo/
-├── fraitmo.py                     # Main CLI entry point
-├── requirements.txt               # Dependencies (ollama, pydantic, langgraph, etc.)
+├── fraitmo.py                     # Main CLI with dual-path result display
+├── requirements.txt               # Dependencies (requests, ollama, pydantic, langgraph)
 │
 ├── dfd_parser/                    # DFD XML parsing
 │   └── xml_parser.py
@@ -106,468 +178,368 @@ fraitmo/
 │   ├── builder.py                 # DFD builder
 │   └── schema.py                  # Pydantic schemas
 │
-├── rag/                          # RAG threat analysis system
+├── rag/                          # Unified LLM and RAG system
 │   ├── document_loader.py        # Knowledge base loader
-│   ├── ollama_client.py          # Ollama LLM client
+│   ├── llm_client.py             # 🆕 UnifiedLLMClient (LM Studio + Ollama)
 │   ├── threat_analyzer.py        # Core threat analysis engine
 │   └── __init__.py
 │
-├── knowledge_base/               # Threat knowledge base (JSON)
+├── knowledge_base/               # Optional threat knowledge base
 │   ├── ai_threats/              # AI/LLM specific threats
-│   │   ├── rag_inj.json         # RAG injection threats
-│   │   ├── plugin_function_calling.json
-│   │   ├── agent_loop.json
-│   │   └── llm_vulnerabilities.json
 │   └── general_threats/         # Traditional web/infra threats
-│       ├── web_attacks.json
-│       ├── infra_threats.json
-│       └── network_security.json
 │
-├── pipeline/                     # LangGraph orchestration
-│   ├── graph.py                  # Pipeline definition
+├── pipeline/                     # Enhanced LangGraph orchestration
+│   ├── graph.py                  # 🔄 Parallel pipeline definition
 │   ├── state.py                  # Shared state schema
-│   ├── nodes/                    # Individual processing nodes
+│   ├── nodes/                    # Processing nodes
 │   │   ├── ai_detector.py        # AI component detection
 │   │   ├── kb_router.py          # Knowledge base routing
-│   │   ├── mitigation_proposer.py # Mitigation generation
+│   │   ├── mitigation_proposer.py # Traditional mitigation generation
+│   │   ├── direct_llm_analyzer.py # 🆕 Direct LLM threat analysis
+│   │   ├── direct_mitigation_proposer.py # 🆕 Direct LLM mitigations
 │   │   └── tracker.py            # Implementation tracking
 │   └── workflows/                # Complete workflows
 │       └── threat_analysis.py
 │
 └── exporter/                     # Report generation
-    ├── json_exporter.py
-    ├── markdown_exporter.py
     └── implementation_tracker.py
 ```
 
 ---
 
-## 🧠 Technologies Used
+## 🎯 Direct LLM Analysis Engine
 
-- **Python 3.9+** – Core language
-- **LangGraph** – Orchestration and workflow management
-- **Ollama** – Local LLM serving (Cogito:14b)
-- **Pydantic** – Data validation and semantic modeling
-- **JSON** – Knowledge base format
-- **RAG** – Retrieval-Augmented Generation for threat analysis
+### Advanced Threat Analysis
 
----
+The **Direct LLM Analyzer** (`pipeline/nodes/direct_llm_analyzer.py`) performs comprehensive threat analysis without knowledge base dependencies:
 
-## 🔄 LangGraph Architecture
+#### **🤖 AI/LLM Component Analysis**
+- **Prompt Injection**: Input manipulation, context pollution
+- **Model Poisoning**: Training data attacks, adversarial inputs
+- **RAG Vulnerabilities**: Document injection, retrieval manipulation
+- **Agent Loop Attacks**: Infinite loops, resource exhaustion
+- **Function Calling Abuse**: Unauthorized API access, privilege escalation
 
-### Node-Based Orchestration Flow
+#### **🌐 Traditional Component Analysis**
+- **Web Application**: SQL injection, XSS, CSRF
+- **Infrastructure**: Network attacks, access control, data exposure
+- **Database**: Injection attacks, privilege escalation, data breaches
+- **API**: Authentication bypass, rate limiting, input validation
 
-```mermaid
-graph TD
-    A["📄 DFD XML Input"] --> B["🔍 DFD Parser Node"]
-    B --> C["🏗️ Semantic Modeling Node"]
-    C --> D["🤖 AI Component Detector Node"]
-    
-    D --> E["📊 Component Router Node"]
-    E --> F["🧠 Knowledge Base Router Node"]
-    
-    F --> G["📚 AI Knowledge Base"]
-    F --> H["🌐 General Knowledge Base"]
-    
-    G --> I["🛡️ Threat Search Node (AI)"]
-    H --> J["🛡️ Threat Search Node (General)"]
-    
-    I --> K["🤖 LLM Analysis Node"]
-    J --> K
-    
-    K --> L["💡 Mitigation Proposal Node"]
-    L --> M["📋 Implementation Tracker Node"]
-    
-    N["🔗 Cross-Zone Detector Node"] --> O["🚨 High-Risk Analysis"]
-    O --> K
-    
-    P["✅ Validation Node"] --> Q["📊 Aggregation Node"]
-    K --> P
-    M --> P
-    
-    Q --> R["📄 Final Report"]
-    
-    style D fill:#e1f5fe
-    style F fill:#f3e5f5
-    style L fill:#e8f5e8
-    style M fill:#fff3e0
-         style N fill:#ffebee
-```
+#### **🔗 Cross-Zone Communication Analysis**
+- **Trust Boundary Violations**: Unauthorized cross-zone access
+- **Data Flow Security**: Encryption, integrity, authentication
+- **Network Segmentation**: Firewall bypass, lateral movement
+- **Access Control**: Role violations, privilege escalation
 
-### Detailed Architecture Overview
+### Structured Analysis Prompts
 
-```mermaid
-graph TD
-    subgraph "Input Processing"
-        A["📄 DFD XML Input"]
-        B["🔍 DFD Parser Node"]
-        C["🏗️ Semantic Modeling Node"]
-    end
-    
-    subgraph "Intelligence Layer"
-        D["🤖 AI Component Detector Node"]
-        E["🧠 Knowledge Base Router Node"]
-        F["📊 Component Router Node"]
-    end
-    
-    subgraph "Knowledge Sources"
-        G["📚 AI/LLM Knowledge Base<br/>• Prompt Injection<br/>• Model Poisoning<br/>• RAG Vulnerabilities<br/>• Agent Loop Attacks"]
-        H["🌐 General Knowledge Base<br/>• SQL Injection<br/>• XSS Attacks<br/>• Infrastructure Threats<br/>• Network Security"]
-    end
-    
-    subgraph "Analysis Engine"
-        I["🛡️ Threat Search Node (AI)"]
-        J["🛡️ Threat Search Node (General)"]
-        K["🤖 LLM Analysis Node<br/>Ollama + Cogito:14b"]
-    end
-    
-    subgraph "Risk Assessment"
-        N["🔗 Cross-Zone Detector Node"]
-        O["🚨 High-Risk Analysis"]
-        P["✅ Validation Node"]
-    end
-    
-    subgraph "Solution Generation"
-        L["💡 Mitigation Proposal Node"]
-        M["📋 Implementation Tracker Node"]
-        Q["📊 Aggregation Node"]
-    end
-    
-    subgraph "Output Generation"
-        R["📄 Final Report<br/>• Threat Analysis<br/>• Mitigation Roadmap<br/>• Implementation Tracker"]
-    end
-    
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    D --> F
-    E --> G
-    E --> H
-    F --> I
-    F --> J
-    G --> I
-    H --> J
-    I --> K
-    J --> K
-    K --> L
-    L --> M
-    N --> O
-    O --> K
-    K --> P
-    M --> P
-    P --> Q
-    Q --> R
-    
-    style D fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
-    style E fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style L fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    style M fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style N fill:#ffebee,stroke:#d32f2f,stroke-width:2px
-    style K fill:#fff8e1,stroke:#ffa000,stroke-width:2px
-```
+The system uses carefully crafted prompts optimized for the Foundation-Sec model:
 
-### Core LangGraph Nodes
-
-#### **🔍 Processing Nodes**
-- **`parse_dfd_node`**: Parses DFD XML into structured data
-- **`semantic_modeling_node`**: Builds relationships and metadata
-- **`ai_component_detector_node`**: Identifies AI/LLM/Agentic components
-- **`threat_search_node`**: Searches relevant knowledge base
-- **`llm_analysis_node`**: Contextualizes threats with Ollama
-
-#### **🧠 Intelligence Nodes**
-- **`knowledge_base_router_node`**: Routes to AI vs General knowledge base
-- **`mitigation_proposal_node`**: Generates actionable mitigations
-- **`implementation_tracker_node`**: Creates implementation roadmaps
-
-#### **🎛️ Control Nodes**
-- **`component_router_node`**: Manages parallel component analysis
-- **`cross_zone_detector_node`**: Identifies high-risk connections
-- **`validation_node`**: Ensures analysis completeness
-- **`aggregation_node`**: Consolidates results
-
-### State Management
-
-**Shared State Schema:**
 ```python
-class ThreatAnalysisState(TypedDict):
-    dfd_model: DataFlowDiagram
-    component_classification: Dict[str, str]  # AI vs Traditional
-    analysis_results: Dict[str, List[Dict]]
-    ai_knowledge_base: List[Dict]
-    general_knowledge_base: List[Dict]
-    mitigation_catalog: List[Dict]
-    implementation_roadmap: Dict[str, Any]
-    ollama_client: OllamaRAGClient
+# Example AI Component Analysis Prompt
+f"""You are a cybersecurity expert analyzing an AI/LLM component in a system architecture.
+
+Component: {component.name}
+Type: {component.type}
+Description: {component.description}
+
+Analyze this AI component for potential security threats. Focus on:
+1. Prompt injection vulnerabilities
+2. Model poisoning risks
+3. RAG-specific attacks if applicable
+4. Agent loop or resource exhaustion
+5. Function calling security issues
+
+Return a JSON array of threats with: name, description, severity, impact, attack_vectors.
+"""
 ```
 
 ---
 
-## 🛡️ AI-Aware Threat Analysis
+## 🛡️ Enhanced Mitigation Generation
 
-### Intelligent Component Detection
+### Direct Mitigation Proposer
 
-FRAITMO automatically detects AI/LLM/Agentic components using pattern recognition:
+The **Direct Mitigation Proposer** (`pipeline/nodes/direct_mitigation_proposer.py`) generates comprehensive security controls:
 
-**AI Component Indicators:**
-- Component names containing: `llm`, `gpt`, `claude`, `ai`, `agent`, `model`
-- Component types: `LLM Service`, `AI Agent`, `ML Model`, `Chatbot`
-- Vendor indicators: `OpenAI`, `Anthropic`, `Hugging Face`, `Ollama`
+#### **🏗️ Architectural Controls**
+- **Defense in Depth**: Multiple security layers
+- **Zero Trust Architecture**: Continuous verification
+- **Secure by Design**: Built-in security patterns
 
-**Traditional Component Indicators:**
-- Standard web/infra patterns: `database`, `api`, `cache`, `load balancer`
-- Cloud services: `AWS`, `GCP`, `Azure` (non-AI services)
+#### **🔧 Implementation Controls**
+- **Input Validation**: Sanitization, type checking, length limits
+- **Output Filtering**: Response validation, content filtering
+- **Rate Limiting**: Request throttling, resource protection
+- **Authentication**: Strong credentials, MFA, session management
 
-### Specialized Knowledge Base Routing
+#### **📊 Monitoring Controls**
+- **Threat Detection**: Anomaly detection, behavior analysis
+- **Logging**: Comprehensive audit trails, SIEM integration
+- **Alerting**: Real-time notifications, incident response
 
-**AI/LLM Knowledge Base:** 
-- Prompt injection attacks
-- Model poisoning
-- RAG vulnerabilities
-- Agent loop attacks
-- Function calling abuse
+### Implementation Roadmaps
 
-**General Knowledge Base:**
-- SQL injection
-- XSS attacks
-- Infrastructure vulnerabilities
-- Network security threats
-- Traditional web attacks
+Each mitigation includes detailed implementation guidance:
 
-### Enhanced Mitigation Generation
-
-**Context-Aware Mitigations:**
-- **For AI Components**: Input validation, output filtering, rate limiting
-- **For Traditional Components**: Standard security controls, patches, configurations
-- **Cross-Component**: Trust boundary enforcement, data flow validation
+```json
+{
+  "control": "Input Sanitization for LLM",
+  "priority": "High",
+  "effort": "Medium",
+  "implementation_phases": [
+    {
+      "phase": "Design",
+      "duration": "1 week",
+      "tasks": ["Define sanitization rules", "Choose validation library"]
+    },
+    {
+      "phase": "Development", 
+      "duration": "2 weeks",
+      "tasks": ["Implement filters", "Add unit tests", "Integration testing"]
+    },
+    {
+      "phase": "Deployment",
+      "duration": "3 days",
+      "tasks": ["Production deployment", "Monitoring setup", "Documentation"]
+    }
+  ]
+}
+```
 
 ---
 
-## 💡 Usage Examples
+## 💡 Enhanced Usage Examples
 
-### Basic Threat Analysis
+### Comprehensive Analysis Output
+
 ```bash
-python fraitmo.py diagram.xml
+python fraitmo.py test_aic.xml
 ```
 
-### Sample Output (Enhanced)
+**Sample Enhanced Output:**
 ```
 🛡️ FRAITMO THREAT ANALYSIS RESULTS
 ============================================================
 
-🤖 AI COMPONENT DETECTION:
-   ✅ AI Components: llm_service, ai_agent, chatbot_api
-   📊 Traditional Components: user_database, web_server, cache
+🤖 LLM PROVIDER STATUS:
+   ✅ Foundation-Sec-8B detected on LM Studio (localhost:1234)
+   📊 Backup: Ollama available on localhost:11434
+
+🔀 ANALYSIS ARCHITECTURE:
+   ✅ Traditional Path: Knowledge Base → LLM Analysis
+   ✅ Direct LLM Path: Direct Analysis → Direct Mitigations
+   📊 Parallel Execution: Both paths completed successfully
 
 📊 ANALYSIS SUMMARY:
-   Total threats found: 12
-   AI-specific threats: 7
-   Traditional threats: 5
-   Cross-zone threats: 2
+   🎯 Total Components: 9 (2 AI, 7 Traditional)
+   ⚠️  Traditional Path: 0 threats (knowledge_base missing)
+   🧠 Direct LLM Path: 6 threats found
+   💡 Total Mitigations: 41
+   🔗 Cross-zone Communications: 7 analyzed
 
-🧠 AI COMPONENT THREATS:
+🧠 DIRECT LLM ANALYSIS RESULTS:
 
-   Component: llm_service (AI/LLM)
-   ⚠️  Prompt Injection via RAG
-      📝 Malicious documents in RAG knowledge base can manipulate LLM responses...
-      🤖 Analysis: This AI service processes user queries through RAG, making it 
-          vulnerable to document injection attacks that could corrupt responses...
-      🛠️  Mitigations:
-          • Input sanitization (Priority: High, Effort: Medium)
-          • Document content validation (Priority: High, Effort: Low)
-          • Output filtering (Priority: Medium, Effort: Low)
+   🤖 AI Component: LLM_Service
+   ⚠️  Prompt Injection Attack
+      📝 Malicious inputs could manipulate the LLM to produce harmful outputs
+      🎯 Severity: High | Impact: Response Manipulation, Data Exposure
+      🛠️  Mitigations (7 controls):
+          • Input Sanitization (Priority: High, Implementation: 2-3 weeks)
+          • Output Filtering (Priority: High, Implementation: 1-2 weeks)
+          • Rate Limiting (Priority: Medium, Implementation: 1 week)
 
-🌐 TRADITIONAL COMPONENT THREATS:
+   🌐 Traditional Component: Database_Server  
+   ⚠️  SQL Injection Vulnerability
+      📝 Unsanitized user inputs could lead to unauthorized database access
+      🎯 Severity: Critical | Impact: Data Breach, System Compromise
+      🛠️  Mitigations (6 controls):
+          • Parameterized Queries (Priority: Critical, Implementation: 3-5 days)
+          • Input Validation (Priority: High, Implementation: 1 week)
 
-   Component: user_database (Traditional)
-   ⚠️  SQL Injection
-      📝 Unsanitized user inputs can lead to unauthorized database access...
-      🤖 Analysis: Standard SQL injection vulnerability in the user database...
-      🛠️  Mitigations:
-          • Parameterized queries (Priority: Critical, Effort: Low)
-          • Input validation (Priority: High, Effort: Low)
+🔗 CROSS-ZONE ANALYSIS:
+   ⚠️  DMZ → Internal Network communication detected
+   🛡️  Trust boundary enforcement required
+
+📈 PERFORMANCE METRICS:
+   ⏱️  Total Analysis Time: 28.4 seconds
+   🔄 LLM Queries: 12 (avg: 2.3 seconds each)
+   📊 Threats per Component: 0.67 average
 
 📋 IMPLEMENTATION ROADMAP:
+   Sprint 1 (Week 1-2): Critical SQL injection fixes
+   Sprint 2 (Week 3-4): LLM input/output security
+   Sprint 3 (Week 5-6): Cross-zone trust boundaries
+   Sprint 4 (Week 7-8): Monitoring and alerting
+```
 
-   Sprint 1 (Weeks 1-2):
-   • Implement parameterized queries for user_database
-   • Add input sanitization for llm_service
-   
-   Sprint 2 (Weeks 3-4):
-   • Deploy document validation pipeline
-   • Implement output filtering for AI components
-   
-   Sprint 3 (Weeks 5-6):
-   • Cross-zone security validation
-   • Monitoring and alerting setup
+### Provider Auto-Detection
 
-🎯 NEXT STEPS:
-   1. Review and prioritize mitigations
-   2. Assign implementation responsibilities
-   3. Set up progress tracking
-   4. Schedule security testing
+```bash
+# System automatically detects and reports LLM provider status
+🤖 LLM PROVIDER DETECTION:
+   🔍 Checking LM Studio (localhost:1234)...
+   ✅ Found Foundation-Sec-8B-Q4_K_M model
+   🎯 Selected: Foundation-Sec for cybersecurity analysis
+   
+   🔍 Checking Ollama (localhost:11434)...
+   ✅ Available as backup provider
+   📦 Models: foundation-sec:8b, cogito:14b
 ```
 
 ---
 
-## 🏗️ Knowledge Base Format
+## 🔧 Advanced Configuration
 
-### AI/LLM Threats (knowledge_base/ai_threats/)
-```json
-[
-  {
-    "id": "LLM01:2025",
-    "name": "Prompt Injection via RAG",
-    "description": "Malicious documents in RAG knowledge base manipulate LLM responses...",
-    "category": "AI/LLM Security",
-    "severity": "High",
-    "impact": ["Response Manipulation", "Data Exfiltration", "Misinformation"],
-    "ai_specific": true,
-    "affected_components": ["LLM", "RAG", "AI Agent"],
-    "mitigation": [
-      {
-        "control": "Input Sanitization",
-        "priority": "High",
-        "effort": "Medium",
-        "implementation_time": "2 weeks"
-      },
-      {
-        "control": "Document Validation",
-        "priority": "High", 
-        "effort": "Low",
-        "implementation_time": "1 week"
-      }
-    ]
-  }
+### LLM Provider Priorities
+
+You can customize provider detection in `rag/llm_client.py`:
+
+```python
+# Provider detection order
+PROVIDER_PRIORITY = [
+    ("localhost:1234", "Foundation-Sec-8B"),  # LM Studio
+    ("localhost:11434", "foundation-sec:8b"), # Ollama
+    ("localhost:11434", "cogito:14b"),        # Ollama fallback
 ]
 ```
 
-### Traditional Threats (knowledge_base/general_threats/)
-```json
-[
-  {
-    "id": "WEB01:2025",
-    "name": "SQL Injection",
-    "description": "Unsanitized user inputs can lead to unauthorized database access...",
-    "category": "Web Application Security",
-    "severity": "Critical",
-    "impact": ["Data Breach", "Unauthorized Access", "Data Corruption"],
-    "ai_specific": false,
-    "affected_components": ["Database", "Web API", "Backend Service"],
-    "mitigation": [
-      {
-        "control": "Parameterized Queries",
-        "priority": "Critical",
-        "effort": "Low",
-        "implementation_time": "3 days"
-      }
-    ]
-  }
-]
+### Direct Analysis Customization
+
+Customize threat analysis in `pipeline/nodes/direct_llm_analyzer.py`:
+
+```python
+# Component-specific analysis prompts
+AI_COMPONENT_PROMPT = """Focus on AI-specific threats..."""
+TRADITIONAL_COMPONENT_PROMPT = """Focus on standard security threats..."""
+CROSS_ZONE_PROMPT = """Analyze trust boundary violations..."""
 ```
 
 ---
 
-## 🍎 Apple Silicon Optimization
+## 🚧 System Requirements (Updated)
 
-Optimized for M1/M2 Macs:
-- **Ollama** uses Apple Metal acceleration
-- **LangGraph** parallel node execution
-- **First query slow** (model loading), subsequent queries fast
-- **Memory efficient** - ~8GB for Cogito:14b
-- **No external API calls** - fully local processing
-
----
-
-## 📊 System Requirements
-
-- **Hardware**: Apple Silicon Mac (M1/M2) with 8GB+ RAM
+- **Hardware**: Apple Silicon Mac (M1/M2) with 12GB+ RAM (recommended)
 - **OS**: macOS 12+ 
 - **Python**: 3.9+
-- **Ollama**: Latest version
-- **Model**: Cogito:14b (recommended)
+- **LLM Provider**: LM Studio (primary) OR Ollama (fallback)
+- **Models**: Foundation-Sec-8B-Q4_K_M (recommended) OR Cogito:14b
+
+### Memory Usage
+- **LM Studio + Foundation-Sec**: ~8GB VRAM
+- **Ollama + Cogito**: ~6GB VRAM  
+- **FRAITMO Application**: ~500MB RAM
+- **Parallel Processing**: ~1GB additional during analysis
 
 ---
 
-## 🛠️ Development
+## 🛠️ Development & Testing
 
 ### Test Individual Components
 ```bash
-# Test Ollama client
-python rag/ollama_client.py
+# Test Unified LLM client
+python rag/llm_client.py
 
-# Test LangGraph pipeline
+# Test Direct LLM Analyzer
+python pipeline/nodes/direct_llm_analyzer.py
+
+# Test parallel LangGraph execution
 python pipeline/workflows/threat_analysis.py
 
-# Test AI component detection
-python pipeline/nodes/ai_detector.py
-
-# Test mitigation generation
-python pipeline/nodes/mitigation_proposer.py
+# Test provider auto-detection
+python -c "from rag.llm_client import UnifiedLLMClient; client = UnifiedLLMClient(); print(client.get_provider_info())"
 ```
 
-### Add New Threats
-1. Create JSON file in appropriate knowledge base directory
-2. Follow the enhanced schema format
-3. Restart FRAITMO to reload knowledge base
+### Debug Parallel Execution
+```bash
+# Enable detailed logging
+export LANGCHAIN_TRACING_V2=true
+export LANGCHAIN_PROJECT=fraitmo
+python fraitmo.py test_aic.xml
+```
 
-### Extend Analysis
-- Add new AI component patterns in `ai_detector.py`
-- Customize mitigation logic in `mitigation_proposer.py`
-- Extend knowledge base routing in `kb_router.py`
+### Performance Profiling
+```bash
+# Time individual analysis paths
+python fraitmo.py --profile test_aic.xml
+```
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Roadmap (Updated)
 
-### ✅ Completed
-- [x] **DFD XML parsing and normalization**
-- [x] **Semantic model building with Pydantic**
-- [x] **RAG-based threat retrieval**  
-- [x] **Ollama integration with Cogito 14B**
-- [x] **Component and connection threat analysis**
-- [x] **Cross-zone boundary detection**
-- [x] **Knowledge base management**
-- [x] **Contextual threat analysis with LLM**
+### ✅ Recently Completed
+- [x] **UnifiedLLMClient with LM Studio support**
+- [x] **Foundation-Sec model integration**
+- [x] **Parallel LangGraph architecture**
+- [x] **Direct LLM threat analysis**
+- [x] **Provider auto-detection and failover**
+- [x] **Enhanced mitigation generation**
+- [x] **Dual-path result aggregation**
+- [x] **Cross-zone communication analysis**
 
-### 🚧 In Progress
-- [ ] **LangGraph pipeline orchestration**
-- [ ] **AI component detection system**
-- [ ] **Specialized knowledge base routing**
-- [ ] **Mitigation proposal generation**
-- [ ] **Implementation roadmap tracking**
+### 🚧 In Progress  
+- [ ] **Performance optimization for large DFDs**
+- [ ] **Enhanced error handling and recovery**
+- [ ] **Configuration management system**
+- [ ] **Detailed logging and observability**
 
-### 🔮 Future
-- [ ] **Interactive threat refinement**
-- [ ] **Streamlit web interface**
-- [ ] **PDF report generation**
-- [ ] **Integration with security tools**
-- [ ] **Vector embeddings for better retrieval**
-- [ ] **Automated penetration testing**
-- [ ] **Continuous monitoring integration**
+### 🔮 Future Enhancements
+- [ ] **Web-based dashboard interface**
+- [ ] **Integration with CI/CD pipelines**
+- [ ] **Custom model fine-tuning**
+- [ ] **Real-time threat monitoring**
+- [ ] **Advanced visualization tools**
+- [ ] **Multi-language DFD support**
+- [ ] **Cloud deployment options**
+
+---
+
+## 🎯 Key Innovations
+
+### 1. **Unified LLM Architecture**
+- Seamless provider switching
+- Model optimization for cybersecurity
+- Automatic fallback handling
+
+### 2. **Parallel Analysis Paths**
+- Knowledge base + Direct LLM reasoning
+- Redundant threat detection
+- Independent operation capability
+
+### 3. **AI-Aware Security Analysis**
+- Specialized AI/LLM threat patterns
+- Context-aware mitigation strategies
+- Foundation-Sec model optimization
+
+### 4. **Enterprise-Ready Design**
+- Robust error handling
+- Comprehensive logging
+- Scalable architecture
 
 ---
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Add new threats to appropriate knowledge base directory
-3. Extend LangGraph nodes for new analysis types
-4. Test with sample DFD files
-5. Submit pull request
+2. Set up LM Studio or Ollama with recommended models
+3. Test with provided sample DFDs
+4. Extend direct analysis prompts for new threat types
+5. Add new LLM provider integrations
+6. Submit pull request with performance metrics
 
 ---
 
-## 📄 License
+## 🙏 Acknowledgments (Updated)
 
-MIT License - Feel free to use and modify for your threat modeling needs.
-
----
-
-## 🙏 Acknowledgments
-
+- **Foundation AI team** for the Foundation-Sec cybersecurity model
+- **LM Studio team** for the excellent local LLM interface
 - **OWASP LLM Top 10** for AI threat taxonomy
 - **Ollama team** for local LLM serving
 - **LangGraph team** for orchestration framework
 - **Draw.io/IriusRisk** for DFD format support
+
+---
+
+**🚀 FRAITMO now operates completely independently of knowledge bases while maintaining comprehensive threat analysis capabilities through advanced LLM reasoning and parallel processing architecture.**

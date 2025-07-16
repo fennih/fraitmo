@@ -11,6 +11,8 @@ from pipeline.state import ThreatAnalysisState
 from pipeline.nodes.ai_detector import ai_component_detector_node
 from pipeline.nodes.kb_router import knowledge_base_router_node, threat_search_node
 from pipeline.nodes.mitigation_proposer import mitigation_proposer_node
+from pipeline.nodes.direct_llm_analyzer import direct_llm_analyzer_node
+from pipeline.nodes.direct_mitigation_proposer import direct_mitigation_proposer_node
 
 from dfd_parser.xml_parser import extract_from_xml
 from models.builder import DFDBuilder
@@ -97,19 +99,15 @@ def semantic_modeling_node(state: ThreatAnalysisState) -> Dict[str, Any]:
 
 def llm_analysis_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
-    LLM Analysis Node - Contextualizes threats using Ollama
+    LLM Analysis Node - Contextualizes threats using UnifiedLLMClient
     """
-    print("🤖 LLM Analysis Node: Analyzing threats with Ollama...")
+    print("🤖 LLM Analysis Node: Analyzing threats with LLM...")
     
     try:
-        from langchain_ollama import ChatOllama
+        from rag.llm_client import UnifiedLLMClient
         
-        # Get configuration
-        model = state.get('ollama_model', os.getenv('OLLAMA_MODEL', 'cogito:14b'))
-        base_url = state.get('ollama_base_url', os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'))
-        
-        # Initialize LLM
-        llm = ChatOllama(model=model, base_url=base_url)
+        # Initialize unified LLM client
+        client = UnifiedLLMClient(preferred_model="foundation-sec")
         
         # Get threats and components for analysis
         threats_found = state.get('threats_found', [])
@@ -132,18 +130,18 @@ def llm_analysis_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         )
         
         print(f"   📤 Sending {len(threats_found)} threats to LLM for analysis...")
-        response = llm.invoke(prompt)
+        response = client.query(prompt, max_tokens=800, temperature=0.1)
         
         # Simple risk assessment
         risk_level = assess_risk_level(threats_found)
         
         threat_analysis = {
-            "llm_response": response.content,
+            "llm_response": response,
             "total_threats": len(threats_found),
             "ai_threats_count": len(state.get('ai_threats', [])),
             "traditional_threats_count": len(state.get('traditional_threats', [])),
             "analysis_timestamp": "now",  # You could use actual timestamp
-            "model_used": model
+            "model_used": f"{client.active_model} via {client.active_provider}"
         }
         
         risk_assessment = {
@@ -159,7 +157,7 @@ def llm_analysis_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         print(f"✅ LLM Analysis Complete:")
         print(f"   📊 Threats Analyzed: {len(threats_found)}")
         print(f"   🚨 Overall Risk: {risk_level}")
-        print(f"   🤖 Model Used: {model}")
+        print(f"   🤖 Model Used: {client.active_model} via {client.active_provider}")
         
         return {
             "threat_analysis": threat_analysis,
@@ -254,7 +252,9 @@ def create_fraitmo_graph():
     workflow.add_node("kb_router", knowledge_base_router_node)
     workflow.add_node("threat_search", threat_search_node)
     workflow.add_node("llm_analysis", llm_analysis_node)
+    workflow.add_node("direct_llm_analyzer", direct_llm_analyzer_node)
     workflow.add_node("mitigation_proposer", mitigation_proposer_node)
+    workflow.add_node("direct_mitigation_proposer", direct_mitigation_proposer_node)
     
     # Set entry point
     workflow.set_entry_point("dfd_parser")
@@ -265,8 +265,17 @@ def create_fraitmo_graph():
     workflow.add_edge("ai_detector", "kb_router")
     workflow.add_edge("kb_router", "threat_search")
     workflow.add_edge("threat_search", "llm_analysis")
+    
+    # Add parallel direct LLM analysis after ai_detector
+    workflow.add_edge("ai_detector", "direct_llm_analyzer")
+    
+    # Both paths have their own mitigation proposers
     workflow.add_edge("llm_analysis", "mitigation_proposer")
+    workflow.add_edge("direct_llm_analyzer", "direct_mitigation_proposer")
+    
+    # Both mitigation paths end
     workflow.add_edge("mitigation_proposer", END)
+    workflow.add_edge("direct_mitigation_proposer", END)
     
     # Compile with memory saver for state persistence
     checkpointer = MemorySaver()
@@ -306,17 +315,23 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
         "ai_threats": [],
         "traditional_threats": [],
         "cross_zone_threats": [],
+        "direct_threats": [],
+        "direct_mitigations": [],
+        "direct_analysis_summary": {},
         "threat_analysis": {},
         "risk_assessment": {},
         "mitigations": [],
         "implementation_plan": {},
+        "direct_mitigations_kb": [],
+        "direct_implementation_plan": {},
+        "direct_mitigation_summary": {},
         "implementation_tracker": {},
         "processing_status": "started",
+        "direct_analysis_status": "pending",
+        "direct_mitigation_status": "pending",
         "current_node": "initializing",
         "errors": [],
-        "warnings": [],
-        "ollama_model": os.getenv('OLLAMA_MODEL', 'cogito:14b'),
-        "ollama_base_url": os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+        "warnings": []
     }
     
     # Configure execution
@@ -349,8 +364,19 @@ def display_analysis_summary(result):
     print(f"   Status: {result.get('processing_status', 'unknown')}")
     print(f"   🤖 AI Components: {len(result.get('ai_components', []))}")
     print(f"   🏗️ Traditional Components: {len(result.get('traditional_components', []))}")
-    print(f"   🚨 Threats Found: {len(result.get('threats_found', []))}")
-    print(f"   💡 Mitigations Proposed: {len(result.get('mitigations', []))}")
+    
+    # Combined threats and mitigations from both paths
+    total_threats = len(result.get('threats_found', [])) + len(result.get('direct_threats', []))
+    total_mitigations = len(result.get('mitigations', [])) + len(result.get('direct_mitigations_kb', []))
+    
+    print(f"   🚨 Total Threats Found: {total_threats}")
+    print(f"     📚 KB Path: {len(result.get('threats_found', []))}")
+    print(f"     🧠 Direct LLM: {len(result.get('direct_threats', []))}")
+    
+    print(f"   💡 Total Mitigations: {total_mitigations}")
+    print(f"     📚 KB Path: {len(result.get('mitigations', []))}")
+    print(f"     🧠 Direct LLM: {len(result.get('direct_mitigations_kb', []))}")
+    
     print(f"   🎯 Overall Risk: {result.get('risk_assessment', {}).get('overall_risk', 'unknown')}")
     
     if result.get('errors'):

@@ -101,9 +101,10 @@ def display_results(result: Dict[str, Any]):
         result.get('traditional_components', [])
     )
     
-    # Threat identification
+    # Threat identification (combined from both paths)
+    all_threats = result.get('threats_found', []) + result.get('direct_threats', [])
     format_threat_summary(
-        result.get('threats_found', []),
+        all_threats,
         result.get('ai_threats', []),
         result.get('traditional_threats', [])
     )
@@ -114,11 +115,16 @@ def display_results(result: Dict[str, Any]):
         result.get('risk_assessment', {})
     )
     
-    # Mitigation proposal
+    # Mitigation proposal (combined from both paths)
+    all_mitigations = result.get('mitigations', []) + result.get('direct_mitigations_kb', [])
     format_mitigation_summary(
-        result.get('mitigations', []),
+        all_mitigations,
         result.get('implementation_plan', {})
     )
+    
+    # Direct LLM Analysis Summary
+    if result.get('direct_threats') or result.get('direct_mitigations_kb'):
+        format_direct_analysis_summary(result)
     
     # Processing status
     print("\n🔄 PROCESSING STATUS:")
@@ -133,6 +139,36 @@ def display_results(result: Dict[str, Any]):
         print(f"   ⚠️ Warnings: {len(result.get('warnings', []))}")
         for warning in result.get('warnings', []):
             print(f"     - {warning}")
+
+
+def format_direct_analysis_summary(result: Dict[str, Any]):
+    """Format direct LLM analysis summary"""
+    print("\n🧠 DIRECT LLM ANALYSIS SUMMARY:")
+    
+    direct_summary = result.get('direct_analysis_summary', {})
+    direct_threats = result.get('direct_threats', [])
+    direct_mitigations = result.get('direct_mitigations_kb', [])
+    
+    print(f"   🎯 Direct Threats Found: {len(direct_threats)}")
+    print(f"   🛡️ Direct Mitigations Generated: {len(direct_mitigations)}")
+    
+    if direct_summary:
+        ai_threats = direct_summary.get('ai_specific_threats', 0)
+        traditional_threats = direct_summary.get('traditional_threats', 0)
+        print(f"   🤖 AI-Specific Threats: {ai_threats}")
+        print(f"   🏗️ Traditional Threats: {traditional_threats}")
+    
+    # Show mitigation summary
+    mitigation_summary = result.get('direct_mitigation_summary', {})
+    if mitigation_summary:
+        print(f"   ⏱️ Estimated Timeline: {mitigation_summary.get('estimated_timeline', 'Unknown')}")
+        
+        priority_breakdown = mitigation_summary.get('by_priority', {})
+        if priority_breakdown:
+            print("   📊 Mitigations by Priority:")
+            for priority, count in priority_breakdown.items():
+                if count > 0:
+                    print(f"     - {priority}: {count}")
 
 
 def main():
@@ -157,12 +193,15 @@ def main():
     
     print(f"📋 Analyzing DFD: {dfd_file}")
     
-    # Check environment configuration
-    ollama_model = os.getenv('OLLAMA_MODEL', 'cogito:14b')
-    ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    # Initialize unified LLM client to detect available providers
+    print("🔍 Detecting available LLM providers...")
+    from rag.llm_client import UnifiedLLMClient
     
-    print(f"🤖 Using Ollama model: {ollama_model}")
-    print(f"🔗 Ollama base URL: {ollama_base_url}")
+    try:
+        test_client = UnifiedLLMClient(preferred_model="foundation-sec")
+    except Exception as e:
+        print(f"⚠️ LLM detection failed: {e}")
+        print("💡 Make sure LM Studio or Ollama is running")
     
     # Run the complete analysis
     try:

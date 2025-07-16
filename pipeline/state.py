@@ -35,23 +35,34 @@ class ThreatAnalysisState(TypedDict):
     traditional_threats: List[Dict[str, Any]]   # Traditional threats
     cross_zone_threats: List[Dict[str, Any]]   # Cross-zone threats
     
+    # Direct LLM analysis (parallel path)
+    direct_threats: List[Dict[str, Any]]       # Direct LLM identified threats
+    direct_mitigations: List[Dict[str, Any]]   # Direct LLM mitigations
+    direct_analysis_summary: Dict[str, Any]    # Direct analysis summary
+    
     # LLM analysis
     threat_analysis: Dict[str, Any]  # LLM analysis results
     risk_assessment: Dict[str, Any]  # Risk assessment results
     
     # Mitigation proposal
-    mitigations: List[Dict[str, Any]]         # Proposed mitigations
+    mitigations: List[Dict[str, Any]]         # Proposed mitigations (from KB)
     implementation_plan: Dict[str, Any]       # Implementation plan with tasks
+    
+    # Direct LLM mitigation proposal (parallel path)
+    direct_mitigations_kb: List[Dict[str, Any]]    # Direct LLM mitigations
+    direct_implementation_plan: Dict[str, Any]     # Direct implementation plan
+    direct_mitigation_summary: Dict[str, Any]      # Direct mitigation summary
     
     # Implementation tracking
     implementation_tracker: Dict[str, Any]  # Progress tracking
     
     # Pipeline state
-    processing_status: str       # Current processing status
+    processing_status: str       # Current processing status (main path)
+    direct_analysis_status: str  # Direct LLM analysis status
+    direct_mitigation_status: str # Direct mitigation status
     current_node: str           # Current node being processed
     errors: List[str]           # Error messages
     warnings: List[str]         # Warning messages
     
-    # Configuration
-    ollama_model: Optional[str]      # Ollama model to use
-    ollama_base_url: Optional[str]   # Ollama base URL
+    # Configuration (now handled by UnifiedLLMClient)
+    # No specific LLM configuration needed - auto-detected

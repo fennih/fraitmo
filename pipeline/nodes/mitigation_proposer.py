@@ -20,14 +20,20 @@ def mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     print("💡 Mitigation Proposer Node: Loading and proposing mitigations...")
     
     try:
+        # Combine threats from both knowledge base and direct LLM analysis
         threats_found = state.get('threats_found', [])
+        direct_threats = state.get('direct_threats', [])
+        direct_mitigations = state.get('direct_mitigations', [])
+        
+        all_threats = threats_found + direct_threats
+        
         ai_components = state.get('ai_components', [])
         traditional_components = state.get('traditional_components', [])
         
-        if not threats_found:
+        if not all_threats:
             print("   ℹ️ No threats found - no mitigations needed")
             return {
-                "mitigations": [],
+                "mitigations": direct_mitigations,  # Include direct mitigations even if no KB threats
                 "implementation_plan": {"status": "no_threats", "tasks": []},
                 "processing_status": "mitigation_complete",
                 "current_node": "mitigation_proposer"

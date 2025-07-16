@@ -1,0 +1,407 @@
+"""
+Direct LLM Mitigation Proposer Node
+Generates mitigation strategies directly using LLM without requiring knowledge base
+"""
+
+from typing import Dict, Any, List
+from pipeline.state import ThreatAnalysisState
+from rag.llm_client import UnifiedLLMClient
+
+
+def direct_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
+    """
+    Direct LLM Mitigation Proposer Node - Generates mitigations using pure LLM reasoning
+    No knowledge base required, pure LLM mitigation strategies
+    """
+    print("🛡️ Direct LLM Mitigation Node: Generating mitigations with pure LLM reasoning...")
+    
+    try:
+        # Get threats from both sources
+        threats_found = state.get('threats_found', [])
+        direct_threats = state.get('direct_threats', [])
+        all_threats = threats_found + direct_threats
+        
+        # Get component data
+        ai_components = state.get('ai_components', [])
+        traditional_components = state.get('traditional_components', [])
+        dfd_model = state.get('dfd_model')
+        
+        if not all_threats:
+            print("   ℹ️ No threats found for mitigation generation")
+            return {
+                "direct_mitigations_kb": [],
+                "direct_implementation_plan": {"status": "no_threats", "tasks": []},
+                "direct_mitigation_status": "no_threats"
+            }
+        
+        # Initialize LLM client
+        try:
+            client = UnifiedLLMClient(preferred_model="foundation-sec")
+        except Exception as e:
+            print(f"   ❌ Failed to initialize LLM client: {e}")
+            return {
+                "direct_mitigations_kb": [],
+                "direct_implementation_plan": {"status": "llm_failed", "tasks": []},
+                "direct_mitigation_status": "failed"
+            }
+        
+        # Generate mitigations for all threats
+        mitigations = []
+        implementation_tasks = []
+        
+        print(f"   🎯 Generating mitigations for {len(all_threats)} threats...")
+        
+        # 1. Generate comprehensive mitigations for each threat
+        for threat in all_threats:
+            threat_mitigations = _generate_comprehensive_mitigations(client, threat, dfd_model)
+            mitigations.extend(threat_mitigations)
+        
+        # 2. Generate architectural mitigations
+        if ai_components:
+            arch_mitigations = _generate_architectural_mitigations(client, ai_components, traditional_components, dfd_model)
+            mitigations.extend(arch_mitigations)
+        
+        # 3. Generate defense-in-depth strategy
+        defense_mitigations = _generate_defense_in_depth_strategy(client, all_threats, dfd_model)
+        mitigations.extend(defense_mitigations)
+        
+        # 4. Generate implementation plan
+        implementation_plan = _generate_implementation_plan(client, mitigations, all_threats)
+        
+        print(f"   ✅ Direct mitigation generation complete: {len(mitigations)} mitigations")
+        
+        return {
+            "direct_mitigations_kb": mitigations,
+            "direct_implementation_plan": implementation_plan,
+            "direct_mitigation_summary": {
+                "total_mitigations": len(mitigations),
+                "by_priority": _categorize_by_priority(mitigations),
+                "by_effort": _categorize_by_effort(mitigations),
+                "estimated_timeline": implementation_plan.get("timeline", "Unknown")
+            },
+            "direct_mitigation_status": "complete"
+        }
+        
+    except Exception as e:
+        print(f"   ❌ Direct mitigation generation failed: {e}")
+        return {
+            "direct_mitigations_kb": [],
+            "direct_implementation_plan": {"status": "error", "tasks": []},
+            "errors": state.get('errors', []) + [f"Direct mitigation generation failed: {str(e)}"],
+            "direct_mitigation_status": "error"
+        }
+
+
+def _generate_comprehensive_mitigations(client: UnifiedLLMClient, threat: Dict, dfd_model) -> List[Dict]:
+    """Generate comprehensive mitigations for a specific threat"""
+    mitigations = []
+    
+    threat_name = threat.get('name', 'Unknown Threat')
+    threat_description = threat.get('description', '')
+    threat_category = threat.get('category', 'General')
+    threat_severity = threat.get('severity', 'Medium')
+    component = threat.get('component', 'Unknown')
+    
+    prompt = f"""You are a cybersecurity expert specializing in mitigation strategies.
+
+Generate comprehensive mitigations for this threat:
+- Threat: {threat_name}
+- Description: {threat_description}
+- Category: {threat_category}
+- Severity: {threat_severity}
+- Component: {component}
+
+Provide 3-5 specific mitigation controls in JSON format:
+[{{
+    "control": "mitigation_name",
+    "description": "detailed_implementation_steps",
+    "priority": "Critical/High/Medium/Low",
+    "effort": "Low/Medium/High",
+    "implementation_time": "time_estimate",
+    "type": "preventive/detective/corrective",
+    "cost": "Low/Medium/High"
+}}]
+
+Focus on:
+- Preventive controls (stop the threat)
+- Detective controls (detect the threat)
+- Corrective controls (respond to the threat)
+
+Only JSON, no additional text."""
+    
+    try:
+        response = client.query(prompt, max_tokens=1000, temperature=0.1)
+        
+        # Parse response
+        parsed_mitigations = _parse_mitigation_response(response, threat.get('id', 'unknown'))
+        
+        for mitigation in parsed_mitigations:
+            mitigation['threat_name'] = threat_name
+            mitigation['component'] = component
+            mitigation['source'] = 'Direct LLM Analysis'
+            mitigations.append(mitigation)
+        
+    except Exception as e:
+        print(f"     ⚠️ Failed to generate mitigations for {threat_name}: {e}")
+        # Fallback mitigation
+        mitigations.append({
+            'control': f'Security Review for {threat_name}',
+            'description': f'Conduct security review to address {threat_name} in {component}',
+            'priority': threat_severity,
+            'effort': 'Medium',
+            'implementation_time': '1-2 weeks',
+            'type': 'preventive',
+            'threat_id': threat.get('id', 'unknown'),
+            'threat_name': threat_name,
+            'component': component,
+            'source': 'Direct LLM Analysis (Fallback)'
+        })
+    
+    return mitigations
+
+
+def _generate_architectural_mitigations(client: UnifiedLLMClient, ai_components: List[Dict], traditional_components: List[Dict], dfd_model) -> List[Dict]:
+    """Generate system-wide architectural security mitigations"""
+    mitigations = []
+    
+    ai_names = [comp.get('name', 'AI Component') for comp in ai_components]
+    traditional_names = [comp.get('name', 'Component') for comp in traditional_components]
+    
+    prompt = f"""You are a security architect specializing in system-wide security controls.
+
+Design architectural security mitigations for this system:
+
+AI/LLM Components: {', '.join(ai_names)}
+Traditional Components: {', '.join(traditional_names)}
+
+Provide 4-6 architectural security controls in JSON format:
+[{{
+    "control": "control_name",
+    "description": "detailed_implementation",
+    "priority": "Critical/High/Medium/Low",
+    "effort": "Low/Medium/High",
+    "implementation_time": "time_estimate",
+    "type": "architectural/network/access_control",
+    "scope": "system_wide/component_specific"
+}}]
+
+Focus on:
+- Zero trust architecture
+- Network segmentation
+- Access controls
+- Monitoring and logging
+- Data protection
+- AI/LLM specific controls
+
+Only JSON, no additional text."""
+    
+    try:
+        response = client.query(prompt, max_tokens=1000, temperature=0.1)
+        
+        # Parse response
+        parsed_mitigations = _parse_mitigation_response(response, 'ARCH')
+        
+        for mitigation in parsed_mitigations:
+            mitigation['component'] = 'System Architecture'
+            mitigation['source'] = 'Direct LLM Analysis'
+            mitigations.append(mitigation)
+        
+    except Exception as e:
+        print(f"     ⚠️ Failed to generate architectural mitigations: {e}")
+    
+    return mitigations
+
+
+def _generate_defense_in_depth_strategy(client: UnifiedLLMClient, threats: List[Dict], dfd_model) -> List[Dict]:
+    """Generate defense-in-depth strategy mitigations"""
+    mitigations = []
+    
+    high_severity_threats = [t for t in threats if t.get('severity', 'Medium') in ['Critical', 'High']]
+    threat_categories = list(set([t.get('category', 'General') for t in threats]))
+    
+    prompt = f"""You are a cybersecurity strategist specializing in defense-in-depth.
+
+Design a layered defense strategy for these threats:
+- Total threats: {len(threats)}
+- High/Critical threats: {len(high_severity_threats)}
+- Threat categories: {', '.join(threat_categories)}
+
+Provide 3-5 defense-in-depth controls in JSON format:
+[{{
+    "control": "control_name",
+    "description": "detailed_implementation",
+    "priority": "Critical/High/Medium/Low",
+    "effort": "Low/Medium/High",
+    "implementation_time": "time_estimate",
+    "type": "perimeter/network/host/application/data",
+    "layer": "which_defense_layer"
+}}]
+
+Focus on layered security:
+- Perimeter defense
+- Network security
+- Host-based security
+- Application security
+- Data security
+
+Only JSON, no additional text."""
+    
+    try:
+        response = client.query(prompt, max_tokens=800, temperature=0.1)
+        
+        # Parse response
+        parsed_mitigations = _parse_mitigation_response(response, 'DEFENSE')
+        
+        for mitigation in parsed_mitigations:
+            mitigation['component'] = 'Defense Strategy'
+            mitigation['source'] = 'Direct LLM Analysis'
+            mitigations.append(mitigation)
+        
+    except Exception as e:
+        print(f"     ⚠️ Failed to generate defense-in-depth strategy: {e}")
+    
+    return mitigations
+
+
+def _generate_implementation_plan(client: UnifiedLLMClient, mitigations: List[Dict], threats: List[Dict]) -> Dict:
+    """Generate implementation plan for all mitigations"""
+    
+    critical_mitigations = [m for m in mitigations if m.get('priority') == 'Critical']
+    high_mitigations = [m for m in mitigations if m.get('priority') == 'High']
+    
+    prompt = f"""You are a project manager specializing in cybersecurity implementations.
+
+Create an implementation plan for these mitigations:
+- Total mitigations: {len(mitigations)}
+- Critical priority: {len(critical_mitigations)}
+- High priority: {len(high_mitigations)}
+
+Provide implementation plan in JSON format:
+{{
+    "timeline": "total_timeline_estimate",
+    "phases": [
+        {{
+            "phase": "phase_name",
+            "duration": "duration",
+            "mitigations": ["mitigation1", "mitigation2"],
+            "resources": "required_resources",
+            "dependencies": "dependencies"
+        }}
+    ],
+    "quick_wins": ["quick_win_controls"],
+    "long_term": ["long_term_controls"],
+    "estimated_cost": "cost_estimate"
+}}
+
+Focus on:
+- Prioritization by risk reduction
+- Resource optimization
+- Quick wins vs long-term strategy
+- Dependencies between controls
+
+Only JSON, no additional text."""
+    
+    try:
+        response = client.query(prompt, max_tokens=800, temperature=0.1)
+        
+        import json
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            plan = json.loads(json_match.group())
+            plan['total_mitigations'] = len(mitigations)
+            plan['generated_by'] = 'Direct LLM Analysis'
+            return plan
+        
+    except Exception as e:
+        print(f"     ⚠️ Failed to generate implementation plan: {e}")
+    
+    # Fallback plan
+    return {
+        "timeline": "3-6 months",
+        "phases": [
+            {
+                "phase": "Critical Controls",
+                "duration": "1 month",
+                "mitigations": [m['control'] for m in critical_mitigations],
+                "resources": "Security team + External consultant",
+                "dependencies": "Management approval"
+            },
+            {
+                "phase": "High Priority Controls",
+                "duration": "2-3 months",
+                "mitigations": [m['control'] for m in high_mitigations],
+                "resources": "Security team",
+                "dependencies": "Phase 1 completion"
+            }
+        ],
+        "quick_wins": [m['control'] for m in mitigations if m.get('effort') == 'Low'],
+        "long_term": [m['control'] for m in mitigations if m.get('effort') == 'High'],
+        "estimated_cost": "Medium to High",
+        "total_mitigations": len(mitigations),
+        "generated_by": "Direct LLM Analysis"
+    }
+
+
+def _parse_mitigation_response(response: str, threat_id: str) -> List[Dict]:
+    """Parse LLM mitigation response into structured mitigations"""
+    import json
+    import re
+    
+    mitigations = []
+    
+    try:
+        # Extract JSON from response
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            parsed_mitigations = json.loads(json_str)
+            
+            for i, mitigation in enumerate(parsed_mitigations):
+                if isinstance(mitigation, dict) and 'control' in mitigation:
+                    structured_mitigation = {
+                        'id': f"DIRECT_MIT_{threat_id}_{i+1}",
+                        'control': mitigation.get('control', 'Unknown Control'),
+                        'description': mitigation.get('description', ''),
+                        'priority': mitigation.get('priority', 'Medium'),
+                        'effort': mitigation.get('effort', 'Medium'),
+                        'implementation_time': mitigation.get('implementation_time', 'Unknown'),
+                        'type': mitigation.get('type', 'preventive'),
+                        'threat_id': threat_id
+                    }
+                    
+                    # Add additional fields if present
+                    for field in ['cost', 'scope', 'layer']:
+                        if field in mitigation:
+                            structured_mitigation[field] = mitigation[field]
+                    
+                    mitigations.append(structured_mitigation)
+        
+    except Exception as e:
+        print(f"     ⚠️ Failed to parse mitigation response: {e}")
+    
+    return mitigations
+
+
+def _categorize_by_priority(mitigations: List[Dict]) -> Dict[str, int]:
+    """Categorize mitigations by priority"""
+    categories = {'Critical': 0, 'High': 0, 'Medium': 0, 'Low': 0}
+    
+    for mitigation in mitigations:
+        priority = mitigation.get('priority', 'Medium')
+        if priority in categories:
+            categories[priority] += 1
+    
+    return categories
+
+
+def _categorize_by_effort(mitigations: List[Dict]) -> Dict[str, int]:
+    """Categorize mitigations by effort level"""
+    categories = {'Low': 0, 'Medium': 0, 'High': 0}
+    
+    for mitigation in mitigations:
+        effort = mitigation.get('effort', 'Medium')
+        if effort in categories:
+            categories[effort] += 1
+    
+    return categories 

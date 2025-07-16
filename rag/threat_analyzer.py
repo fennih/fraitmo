@@ -5,7 +5,7 @@ Finds relevant threats from knowledge base based on components and connections
 
 from typing import List, Dict, Set, Optional
 from .document_loader import load_knowledge_base, search_documents
-from .ollama_client import OllamaRAGClient
+from .llm_client import UnifiedLLMClient
 from models.schema import Component, Connection, DataFlowDiagram
 
 
@@ -46,10 +46,10 @@ class ThreatAnalyzer:
             self.documents = []
     
     def _initialize_rag_client(self):
-        """Initialize the RAG client"""
+        """Initialize the unified RAG client"""
         try:
-            self.client = OllamaRAGClient()
-            print("🤖 RAG client initialized")
+            self.client = UnifiedLLMClient(preferred_model="foundation-sec")
+            print("🤖 Unified RAG client initialized")
         except Exception as e:
             print(f"❌ Failed to initialize RAG client: {e}")
             self.client = None

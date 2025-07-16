@@ -2,6 +2,7 @@
 pydantic>=2.0.0
 pathlib
 python-dotenv>=1.0.0
+requests>=2.28.0
 
 # LangGraph ecosystem (latest versions)
 langgraph>=0.5.2
@@ -16,6 +17,13 @@ langgraph-checkpoint-postgres>=1.0.0  # For production (optional)
 
 # Ollama client (latest available version)
 ollama>=0.5.1
+
+# Hugging Face dependencies (for alternative to Ollama)
+transformers>=4.35.0
+torch>=2.0.0
+accelerate>=0.20.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
 
 # System monitoring
 psutil>=5.9.0
