@@ -9,10 +9,11 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from pipeline.state import ThreatAnalysisState
 from pipeline.nodes.ai_detector import ai_component_detector_node
-from pipeline.nodes.kb_router import knowledge_base_router_node, threat_search_node
-from pipeline.nodes.mitigation_proposer import mitigation_proposer_node
-from pipeline.nodes.direct_llm_analyzer import direct_llm_analyzer_node
-from pipeline.nodes.direct_mitigation_proposer import direct_mitigation_proposer_node
+from pipeline.nodes.kb_router import knowledge_base_router_node
+from pipeline.nodes.rag_threat_searcher import rag_threat_search_node
+from pipeline.nodes.rag_mitigation_proposer import rag_mitigation_proposer_node
+from pipeline.nodes.llm_analyzer import llm_analyzer_node
+from pipeline.nodes.llm_mitigation_proposer import llm_mitigation_proposer_node
 
 from dfd_parser.xml_parser import extract_from_xml
 from models.builder import DFDBuilder
@@ -250,11 +251,11 @@ def create_fraitmo_graph():
     workflow.add_node("semantic_modeling", semantic_modeling_node)
     workflow.add_node("ai_detector", ai_component_detector_node)
     workflow.add_node("kb_router", knowledge_base_router_node)
-    workflow.add_node("threat_search", threat_search_node)
+    workflow.add_node("rag_threat_search", rag_threat_search_node)
     workflow.add_node("llm_analysis", llm_analysis_node)
-    workflow.add_node("direct_llm_analyzer", direct_llm_analyzer_node)
-    workflow.add_node("mitigation_proposer", mitigation_proposer_node)
-    workflow.add_node("direct_mitigation_proposer", direct_mitigation_proposer_node)
+    workflow.add_node("llm_analyzer", llm_analyzer_node)
+    workflow.add_node("rag_mitigation_proposer", rag_mitigation_proposer_node)
+    workflow.add_node("llm_mitigation_proposer", llm_mitigation_proposer_node)
     
     # Set entry point
     workflow.set_entry_point("dfd_parser")
@@ -263,19 +264,19 @@ def create_fraitmo_graph():
     workflow.add_edge("dfd_parser", "semantic_modeling")
     workflow.add_edge("semantic_modeling", "ai_detector")
     workflow.add_edge("ai_detector", "kb_router")
-    workflow.add_edge("kb_router", "threat_search")
-    workflow.add_edge("threat_search", "llm_analysis")
+    workflow.add_edge("kb_router", "rag_threat_search")
+    workflow.add_edge("rag_threat_search", "llm_analysis")
     
-    # Add parallel direct LLM analysis after ai_detector
-    workflow.add_edge("ai_detector", "direct_llm_analyzer")
+    # Add parallel LLM analysis after ai_detector
+    workflow.add_edge("ai_detector", "llm_analyzer")
     
     # Both paths have their own mitigation proposers
-    workflow.add_edge("llm_analysis", "mitigation_proposer")
-    workflow.add_edge("direct_llm_analyzer", "direct_mitigation_proposer")
+    workflow.add_edge("llm_analysis", "rag_mitigation_proposer")
+    workflow.add_edge("llm_analyzer", "llm_mitigation_proposer")
     
     # Both mitigation paths end
-    workflow.add_edge("mitigation_proposer", END)
-    workflow.add_edge("direct_mitigation_proposer", END)
+    workflow.add_edge("rag_mitigation_proposer", END)
+    workflow.add_edge("llm_mitigation_proposer", END)
     
     # Compile with memory saver for state persistence
     checkpointer = MemorySaver()
@@ -315,20 +316,19 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
         "ai_threats": [],
         "traditional_threats": [],
         "cross_zone_threats": [],
-        "direct_threats": [],
-        "direct_mitigations": [],
-        "direct_analysis_summary": {},
+        "llm_threats": [],
+        "llm_mitigations": [],
+        "llm_analysis_summary": {},
         "threat_analysis": {},
         "risk_assessment": {},
-        "mitigations": [],
-        "implementation_plan": {},
-        "direct_mitigations_kb": [],
-        "direct_implementation_plan": {},
-        "direct_mitigation_summary": {},
+        "rag_mitigations": [],
+        "rag_implementation_plan": {},
+        "llm_implementation_plan": {},
+        "llm_mitigation_summary": {},
         "implementation_tracker": {},
         "processing_status": "started",
-        "direct_analysis_status": "pending",
-        "direct_mitigation_status": "pending",
+        "llm_analysis_status": "pending",
+        "llm_mitigation_status": "pending",
         "current_node": "initializing",
         "errors": [],
         "warnings": []
@@ -366,16 +366,16 @@ def display_analysis_summary(result):
     print(f"   🏗️ Traditional Components: {len(result.get('traditional_components', []))}")
     
     # Combined threats and mitigations from both paths
-    total_threats = len(result.get('threats_found', [])) + len(result.get('direct_threats', []))
-    total_mitigations = len(result.get('mitigations', [])) + len(result.get('direct_mitigations_kb', []))
+    total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
+    total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
     
     print(f"   🚨 Total Threats Found: {total_threats}")
-    print(f"     📚 KB Path: {len(result.get('threats_found', []))}")
-    print(f"     🧠 Direct LLM: {len(result.get('direct_threats', []))}")
+    print(f"     📚 RAG Path: {len(result.get('threats_found', []))}")
+    print(f"     🧠 LLM Path: {len(result.get('llm_threats', []))}")
     
     print(f"   💡 Total Mitigations: {total_mitigations}")
-    print(f"     📚 KB Path: {len(result.get('mitigations', []))}")
-    print(f"     🧠 Direct LLM: {len(result.get('direct_mitigations_kb', []))}")
+    print(f"     📚 RAG Path: {len(result.get('rag_mitigations', []))}")
+    print(f"     🧠 LLM Path: {len(result.get('llm_mitigations', []))}")
     
     print(f"   🎯 Overall Risk: {result.get('risk_assessment', {}).get('overall_risk', 'unknown')}")
     

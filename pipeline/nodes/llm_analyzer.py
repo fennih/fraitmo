@@ -1,5 +1,5 @@
 """
-Direct LLM Threat Analysis Node
+LLM Threat Analysis Node
 Analyzes DFD components directly with LLM without requiring knowledge base
 """
 
@@ -8,12 +8,12 @@ from pipeline.state import ThreatAnalysisState
 from rag.llm_client import UnifiedLLMClient
 
 
-def direct_llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
+def llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
-    Direct LLM Analysis Node - Analyzes threats using only LLM reasoning
+    LLM Analysis Node - Analyzes threats using only LLM reasoning
     No knowledge base required, pure LLM threat modeling
     """
-    print("🧠 Direct LLM Analysis Node: Analyzing threats with pure LLM reasoning...")
+    print("🧠 LLM Analysis Node: Analyzing threats with pure LLM reasoning...")
     
     try:
         # Get DFD data
@@ -26,7 +26,7 @@ def direct_llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
             return {
                 "direct_threats": [],
                 "direct_mitigations": [],
-                "direct_analysis_status": "skipped"
+                "llm_analysis_status": "skipped"
             }
         
         # Initialize LLM client
@@ -37,7 +37,7 @@ def direct_llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
             return {
                 "direct_threats": [],
                 "direct_mitigations": [],
-                "direct_analysis_status": "failed"
+                "llm_analysis_status": "failed"
             }
         
         # Analyze different aspects
@@ -66,27 +66,27 @@ def direct_llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         threats.extend(boundary_threats)
         mitigations.extend(boundary_mitigations)
         
-        print(f"   ✅ Direct LLM analysis complete: {len(threats)} threats, {len(mitigations)} mitigations")
+        print(f"   ✅ LLM analysis complete: {len(threats)} threats, {len(mitigations)} mitigations")
         
         return {
-            "direct_threats": threats,
-            "direct_mitigations": mitigations,
-            "direct_analysis_summary": {
+            "llm_threats": threats,
+            "llm_mitigations": mitigations,
+            "llm_analysis_summary": {
                 "total_threats": len(threats),
                 "total_mitigations": len(mitigations),
                 "ai_specific_threats": len([t for t in threats if t.get('category') == 'AI/LLM Security']),
                 "traditional_threats": len([t for t in threats if t.get('category') != 'AI/LLM Security'])
             },
-            "direct_analysis_status": "complete"
+            "llm_analysis_status": "complete"
         }
         
     except Exception as e:
-        print(f"   ❌ Direct LLM analysis failed: {e}")
+        print(f"   ❌ LLM analysis failed: {e}")
         return {
             "direct_threats": [],
             "direct_mitigations": [],
-            "errors": state.get('errors', []) + [f"Direct LLM analysis failed: {str(e)}"],
-            "direct_analysis_status": "error"
+            "errors": state.get('errors', []) + [f"LLM analysis failed: {str(e)}"],
+            "llm_analysis_status": "error"
         }
 
 

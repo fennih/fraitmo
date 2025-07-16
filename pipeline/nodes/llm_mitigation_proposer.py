@@ -1,5 +1,5 @@
 """
-Direct LLM Mitigation Proposer Node
+LLM Mitigation Proposer Node
 Generates mitigation strategies directly using LLM without requiring knowledge base
 """
 
@@ -8,18 +8,18 @@ from pipeline.state import ThreatAnalysisState
 from rag.llm_client import UnifiedLLMClient
 
 
-def direct_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
+def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
-    Direct LLM Mitigation Proposer Node - Generates mitigations using pure LLM reasoning
+    LLM Mitigation Proposer Node - Generates mitigations using pure LLM reasoning
     No knowledge base required, pure LLM mitigation strategies
     """
-    print("🛡️ Direct LLM Mitigation Node: Generating mitigations with pure LLM reasoning...")
+    print("🛡️ LLM Mitigation Node: Generating mitigations with pure LLM reasoning...")
     
     try:
         # Get threats from both sources
         threats_found = state.get('threats_found', [])
-        direct_threats = state.get('direct_threats', [])
-        all_threats = threats_found + direct_threats
+        llm_threats = state.get('llm_threats', [])
+        all_threats = threats_found + llm_threats
         
         # Get component data
         ai_components = state.get('ai_components', [])
@@ -29,9 +29,9 @@ def direct_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any
         if not all_threats:
             print("   ℹ️ No threats found for mitigation generation")
             return {
-                "direct_mitigations_kb": [],
-                "direct_implementation_plan": {"status": "no_threats", "tasks": []},
-                "direct_mitigation_status": "no_threats"
+                "llm_mitigations": [],
+                "llm_implementation_plan": {"status": "no_threats", "tasks": []},
+                "llm_mitigation_status": "no_threats"
             }
         
         # Initialize LLM client
@@ -40,9 +40,9 @@ def direct_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any
         except Exception as e:
             print(f"   ❌ Failed to initialize LLM client: {e}")
             return {
-                "direct_mitigations_kb": [],
-                "direct_implementation_plan": {"status": "llm_failed", "tasks": []},
-                "direct_mitigation_status": "failed"
+                "llm_mitigations": [],
+                "llm_implementation_plan": {"status": "llm_failed", "tasks": []},
+                "llm_mitigation_status": "failed"
             }
         
         # Generate mitigations for all threats
@@ -68,27 +68,27 @@ def direct_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any
         # 4. Generate implementation plan
         implementation_plan = _generate_implementation_plan(client, mitigations, all_threats)
         
-        print(f"   ✅ Direct mitigation generation complete: {len(mitigations)} mitigations")
+        print(f"   ✅ LLM mitigation generation complete: {len(mitigations)} mitigations")
         
         return {
-            "direct_mitigations_kb": mitigations,
-            "direct_implementation_plan": implementation_plan,
-            "direct_mitigation_summary": {
+            "llm_mitigations": mitigations,
+            "llm_implementation_plan": implementation_plan,
+            "llm_mitigation_summary": {
                 "total_mitigations": len(mitigations),
                 "by_priority": _categorize_by_priority(mitigations),
                 "by_effort": _categorize_by_effort(mitigations),
                 "estimated_timeline": implementation_plan.get("timeline", "Unknown")
             },
-            "direct_mitigation_status": "complete"
+            "llm_mitigation_status": "complete"
         }
         
     except Exception as e:
-        print(f"   ❌ Direct mitigation generation failed: {e}")
+        print(f"   ❌ LLM mitigation generation failed: {e}")
         return {
-            "direct_mitigations_kb": [],
-            "direct_implementation_plan": {"status": "error", "tasks": []},
-            "errors": state.get('errors', []) + [f"Direct mitigation generation failed: {str(e)}"],
-            "direct_mitigation_status": "error"
+            "llm_mitigations": [],
+            "llm_implementation_plan": {"status": "error", "tasks": []},
+            "errors": state.get('errors', []) + [f"LLM mitigation generation failed: {str(e)}"],
+            "llm_mitigation_status": "error"
         }
 
 
@@ -310,7 +310,7 @@ Only JSON, no additional text."""
         if json_match:
             plan = json.loads(json_match.group())
             plan['total_mitigations'] = len(mitigations)
-            plan['generated_by'] = 'Direct LLM Analysis'
+            plan['generated_by'] = 'LLM Analysis'
             return plan
         
     except Exception as e:

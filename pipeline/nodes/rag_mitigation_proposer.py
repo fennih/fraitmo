@@ -1,15 +1,15 @@
-# Mitigation Proposer Node - Generates and proposes security mitigations
+# RAG Mitigation Proposer Node - Generates and proposes security mitigations using knowledge base
 
 from typing import Dict, List, Any
 from pipeline.state import ThreatAnalysisState
 from rag.document_loader import load_knowledge_base
 
-def mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
+def rag_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
-    Mitigation Proposer Node
+    RAG Mitigation Proposer Node
     
     Loads appropriate mitigations knowledge base and proposes specific mitigations
-    for identified threats based on component classification.
+    for identified threats based on component classification using RAG.
     
     Args:
         state: Current threat analysis state
@@ -17,15 +17,15 @@ def mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     Returns:
         Updated state with proposed mitigations
     """
-    print("💡 Mitigation Proposer Node: Loading and proposing mitigations...")
+    print("💡 RAG Mitigation Proposer Node: Loading and proposing mitigations from knowledge base...")
     
     try:
         # Combine threats from both knowledge base and direct LLM analysis
         threats_found = state.get('threats_found', [])
-        direct_threats = state.get('direct_threats', [])
-        direct_mitigations = state.get('direct_mitigations', [])
+        llm_threats = state.get('llm_threats', [])
+        llm_mitigations = state.get('llm_mitigations', [])
         
-        all_threats = threats_found + direct_threats
+        all_threats = threats_found + llm_threats
         
         ai_components = state.get('ai_components', [])
         traditional_components = state.get('traditional_components', [])
@@ -33,10 +33,10 @@ def mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         if not all_threats:
             print("   ℹ️ No threats found - no mitigations needed")
             return {
-                "mitigations": direct_mitigations,  # Include direct mitigations even if no KB threats
+                "rag_mitigations": llm_mitigations,  # Include LLM mitigations even if no KB threats
                 "implementation_plan": {"status": "no_threats", "tasks": []},
                 "processing_status": "mitigation_complete",
-                "current_node": "mitigation_proposer"
+                "current_node": "rag_mitigation_proposer"
             }
         
         # Load mitigation knowledge bases
@@ -75,23 +75,23 @@ def mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         # Create implementation plan
         implementation_plan = create_implementation_plan(prioritized_mitigations)
         
-        print(f"✅ Mitigation Proposal Complete:")
+        print(f"✅ RAG Mitigation Proposal Complete:")
         print(f"   💡 Mitigations Proposed: {len(prioritized_mitigations)}")
         print(f"   📋 Implementation Tasks: {len(implementation_plan.get('tasks', []))}")
         
         return {
-            "mitigations": prioritized_mitigations,
-            "implementation_plan": implementation_plan,
-            "processing_status": "mitigation_complete",
-            "current_node": "mitigation_proposer"
+            "rag_mitigations": prioritized_mitigations,
+            "rag_implementation_plan": implementation_plan,
+            "processing_status": "rag_mitigation_complete",
+            "current_node": "rag_mitigation_proposer"
         }
         
     except Exception as e:
-        print(f"❌ Mitigation Proposer Error: {e}")
+        print(f"❌ RAG Mitigation Proposer Error: {e}")
         return {
-            "errors": state.get('errors', []) + [f"Mitigation proposal failed: {str(e)}"],
+            "errors": state.get('errors', []) + [f"RAG mitigation proposal failed: {str(e)}"],
             "processing_status": "error",
-            "current_node": "mitigation_proposer"
+            "current_node": "rag_mitigation_proposer"
         }
 
 

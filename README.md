@@ -105,11 +105,11 @@ The system gracefully handles provider failures:
 
 ---
 
-## 🏗️ Parallel LangGraph Architecture
+## 🏗️ Enhanced Parallel LangGraph Architecture
 
-### Dual-Path Analysis System
+### Dual-Path Analysis System with Optimized Node Separation
 
-FRAITMO implements a sophisticated **parallel analysis architecture** that combines traditional knowledge base lookup with direct LLM reasoning:
+FRAITMO implements a sophisticated **parallel analysis architecture** with **10 specialized nodes** that combines traditional knowledge base lookup with direct LLM reasoning:
 
 ```mermaid
 graph TD
@@ -119,19 +119,19 @@ graph TD
     
     D --> E["🔀 PARALLEL EXECUTION"]
     
-    E --> F["📚 Traditional Path"]
-    E --> G["🧠 Direct LLM Path"]
+    E --> F["📚 RAG Path"]
+    E --> G["🧠 LLM Path"]
     
-    subgraph "Traditional Knowledge Base Path"
+    subgraph RAG["🔍 RAG Path (Knowledge Base)"]
         F --> H["📊 KB Router"]
-        H --> I["🔍 Threat Search"]
+        H --> I["🔍 RAG Threat Search"]
         I --> J["🧠 LLM Analysis"]
-        J --> K["💡 Mitigation Proposer"]
+        J --> K["💡 RAG Mitigation Proposer"]
     end
     
-    subgraph "Direct LLM Analysis Path"
-        G --> L["🎯 Direct LLM Analyzer"]
-        L --> M["🛡️ Direct Mitigation Proposer"]
+    subgraph LLM["🧠 LLM Path (Direct)"]
+        G --> L["🎯 LLM Analyzer"]
+        L --> M["🛡️ LLM Mitigation Proposer"]
     end
     
     K --> N["📊 Results Aggregation"]
@@ -139,28 +139,53 @@ graph TD
     N --> O["📄 Final Report"]
     
     style E fill:#ffeb3b,stroke:#f57f17,stroke-width:3px
-    style L fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
-    style M fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    style H fill:#e8f5e8,stroke:#4caf50,stroke-width:3px
+    style I fill:#e8f5e8,stroke:#4caf50,stroke-width:3px
+    style J fill:#e8f5e8,stroke:#4caf50,stroke-width:3px
+    style K fill:#e8f5e8,stroke:#4caf50,stroke-width:3px
+    style L fill:#fff3e0,stroke:#ff9800,stroke-width:3px
+    style M fill:#fff3e0,stroke:#ff9800,stroke-width:3px
 ```
+
+### Enhanced Node Architecture
+
+#### **🔍 RAG Path Nodes (Green)**
+| Node | Function | File |
+|------|----------|------|
+| **KB Router** | Load appropriate knowledge bases (AI vs General) | `kb_router.py` |
+| **RAG Threat Search** | Search threats in loaded knowledge bases | `rag_threat_searcher.py` |
+| **LLM Analysis** | Contextualize found threats with LLM | `graph.py` |
+| **RAG Mitigation Proposer** | Generate mitigations from knowledge base | `rag_mitigation_proposer.py` |
+
+#### **🧠 LLM Path Nodes (Orange)**
+| Node | Function | File |
+|------|----------|------|
+| **LLM Analyzer** | Direct threat analysis using pure LLM reasoning | `llm_analyzer.py` |
+| **LLM Mitigation Proposer** | Generate mitigations using direct LLM reasoning | `llm_mitigation_proposer.py` |
 
 ### Path Comparison
 
-| Aspect | Traditional Path | Direct LLM Path |
-|--------|------------------|------------------|
+| Aspect | RAG Path | LLM Path |
+|--------|----------|----------|
 | **Data Source** | Structured knowledge base | LLM reasoning |
 | **Coverage** | Known threat patterns | Comprehensive analysis |
 | **Speed** | Fast (database lookup) | Moderate (LLM processing) |
 | **Innovation** | Limited to KB content | Creative threat discovery |
 | **Reliability** | High (structured data) | High (Foundation-Sec model) |
 | **Dependencies** | Requires knowledge_base/ | Independent operation |
+| **Node Count** | 4 specialized nodes | 2 specialized nodes |
+| **Nomenclature** | `rag_` prefix | `llm_` prefix |
 
-### Benefits of Parallel Architecture
+### Benefits of Enhanced Parallel Architecture
 
-1. **Redundancy**: If knowledge base is missing, direct LLM path still works
-2. **Comprehensive Coverage**: Combines structured knowledge with LLM creativity
-3. **Performance**: Both paths run simultaneously for faster results
-4. **Reliability**: System remains functional even with partial failures
-5. **Innovation**: Direct LLM path can discover novel threat patterns
+1. **Modular Design**: Clean separation of responsibilities with dedicated nodes
+2. **Clear Nomenclature**: `rag_` and `llm_` prefixes for immediate identification
+3. **Redundancy**: If knowledge base is missing, LLM path still works
+4. **Comprehensive Coverage**: Combines structured knowledge with LLM creativity
+5. **Performance**: Both paths run simultaneously for faster results
+6. **Reliability**: System remains functional even with partial failures
+7. **Innovation**: LLM path can discover novel threat patterns
+8. **Maintainability**: Easier debugging and extension with specialized nodes
 
 ---
 
@@ -190,13 +215,14 @@ fraitmo/
 │
 ├── pipeline/                     # Enhanced LangGraph orchestration
 │   ├── graph.py                  # 🔄 Parallel pipeline definition
-│   ├── state.py                  # Shared state schema
+│   ├── state.py                  # Shared state schema (updated nomenclature)
 │   ├── nodes/                    # Processing nodes
 │   │   ├── ai_detector.py        # AI component detection
 │   │   ├── kb_router.py          # Knowledge base routing
-│   │   ├── mitigation_proposer.py # Traditional mitigation generation
-│   │   ├── direct_llm_analyzer.py # 🆕 Direct LLM threat analysis
-│   │   ├── direct_mitigation_proposer.py # 🆕 Direct LLM mitigations
+│   │   ├── rag_threat_searcher.py # 🔍 RAG-based threat search (separated)
+│   │   ├── rag_mitigation_proposer.py # 📚 RAG mitigation generation
+│   │   ├── llm_analyzer.py       # 🧠 LLM threat analysis (renamed)
+│   │   ├── llm_mitigation_proposer.py # 🛡️ LLM mitigations (renamed)
 │   │   └── tracker.py            # Implementation tracking
 │   └── workflows/                # Complete workflows
 │       └── threat_analysis.py
@@ -207,11 +233,11 @@ fraitmo/
 
 ---
 
-## 🎯 Direct LLM Analysis Engine
+## 🧠 LLM Analysis Engine
 
 ### Advanced Threat Analysis
 
-The **Direct LLM Analyzer** (`pipeline/nodes/direct_llm_analyzer.py`) performs comprehensive threat analysis without knowledge base dependencies:
+The **LLM Analyzer** (`pipeline/nodes/llm_analyzer.py`) performs comprehensive threat analysis without knowledge base dependencies:
 
 #### **🤖 AI/LLM Component Analysis**
 - **Prompt Injection**: Input manipulation, context pollution
@@ -259,9 +285,9 @@ Return a JSON array of threats with: name, description, severity, impact, attack
 
 ## 🛡️ Enhanced Mitigation Generation
 
-### Direct Mitigation Proposer
+### LLM Mitigation Proposer
 
-The **Direct Mitigation Proposer** (`pipeline/nodes/direct_mitigation_proposer.py`) generates comprehensive security controls:
+The **LLM Mitigation Proposer** (`pipeline/nodes/llm_mitigation_proposer.py`) generates comprehensive security controls:
 
 #### **🏗️ Architectural Controls**
 - **Defense in Depth**: Multiple security layers
@@ -328,18 +354,18 @@ python fraitmo.py test_aic.xml
    📊 Backup: Ollama available on localhost:11434
 
 🔀 ANALYSIS ARCHITECTURE:
-   ✅ Traditional Path: Knowledge Base → LLM Analysis
-   ✅ Direct LLM Path: Direct Analysis → Direct Mitigations
+   ✅ RAG Path: KB Router → RAG Threat Search → LLM Analysis → RAG Mitigation Proposer
+   ✅ LLM Path: LLM Analyzer → LLM Mitigation Proposer
    📊 Parallel Execution: Both paths completed successfully
 
 📊 ANALYSIS SUMMARY:
    🎯 Total Components: 9 (2 AI, 7 Traditional)
-   ⚠️  Traditional Path: 0 threats (knowledge_base missing)
-   🧠 Direct LLM Path: 6 threats found
-   💡 Total Mitigations: 41
+   📚 RAG Path: 0 threats (knowledge_base missing)
+   🧠 LLM Path: 6 threats found
+   💡 Total Mitigations: 41 (RAG: 0, LLM: 41)
    🔗 Cross-zone Communications: 7 analyzed
 
-🧠 DIRECT LLM ANALYSIS RESULTS:
+🧠 LLM ANALYSIS RESULTS:
 
    🤖 AI Component: LLM_Service
    ⚠️  Prompt Injection Attack
@@ -405,15 +431,29 @@ PROVIDER_PRIORITY = [
 ]
 ```
 
-### Direct Analysis Customization
+### LLM Analysis Customization
 
-Customize threat analysis in `pipeline/nodes/direct_llm_analyzer.py`:
+Customize threat analysis in `pipeline/nodes/llm_analyzer.py`:
 
 ```python
 # Component-specific analysis prompts
 AI_COMPONENT_PROMPT = """Focus on AI-specific threats..."""
 TRADITIONAL_COMPONENT_PROMPT = """Focus on standard security threats..."""
 CROSS_ZONE_PROMPT = """Analyze trust boundary violations..."""
+```
+
+### RAG Threat Search Customization
+
+Customize knowledge base search in `pipeline/nodes/rag_threat_searcher.py`:
+
+```python
+# Search strategies for different component types
+def search_threats_for_component(component, knowledge_base, threat_type):
+    # AI-specific threat patterns
+    if threat_type == "ai":
+        return search_ai_specific_threats(component, knowledge_base)
+    # Traditional infrastructure threats  
+    return search_traditional_threats(component, knowledge_base)
 ```
 
 ---
@@ -441,8 +481,11 @@ CROSS_ZONE_PROMPT = """Analyze trust boundary violations..."""
 # Test Unified LLM client
 python rag/llm_client.py
 
-# Test Direct LLM Analyzer
-python pipeline/nodes/direct_llm_analyzer.py
+# Test LLM Analyzer (renamed)
+python pipeline/nodes/llm_analyzer.py
+
+# Test RAG Threat Searcher (new separated node)
+python pipeline/nodes/rag_threat_searcher.py
 
 # Test parallel LangGraph execution
 python pipeline/workflows/threat_analysis.py
@@ -473,11 +516,15 @@ python fraitmo.py --profile test_aic.xml
 - [x] **UnifiedLLMClient with LM Studio support**
 - [x] **Foundation-Sec model integration**
 - [x] **Parallel LangGraph architecture**
-- [x] **Direct LLM threat analysis**
+- [x] **LLM threat analysis (renamed from direct)**
 - [x] **Provider auto-detection and failover**
 - [x] **Enhanced mitigation generation**
 - [x] **Dual-path result aggregation**
 - [x] **Cross-zone communication analysis**
+- [x] **🆕 Node architecture refactoring with clear nomenclature**
+- [x] **🆕 Separated threat search from KB router**
+- [x] **🆕 RAG vs LLM path visual distinction**
+- [x] **🆕 10-node specialized architecture**
 
 ### 🚧 In Progress  
 - [ ] **Performance optimization for large DFDs**
@@ -503,20 +550,81 @@ python fraitmo.py --profile test_aic.xml
 - Model optimization for cybersecurity
 - Automatic fallback handling
 
-### 2. **Parallel Analysis Paths**
-- Knowledge base + Direct LLM reasoning
-- Redundant threat detection
-- Independent operation capability
+### 2. **Enhanced Parallel Analysis Paths**
+- RAG path: Knowledge base + LLM reasoning (4 specialized nodes)
+- LLM path: Direct LLM analysis (2 specialized nodes)
+- Clear separation with `rag_` and `llm_` nomenclature
+- Redundant threat detection with independent operation
 
-### 3. **AI-Aware Security Analysis**
+### 3. **Modular Node Architecture**
+- 10 specialized nodes with single responsibilities
+- Separated threat search from knowledge base routing
+- Visual distinction between RAG and LLM processing
+- Easy maintenance and extension
+
+### 4. **AI-Aware Security Analysis**
 - Specialized AI/LLM threat patterns
 - Context-aware mitigation strategies
 - Foundation-Sec model optimization
 
-### 4. **Enterprise-Ready Design**
+### 5. **Enterprise-Ready Design**
 - Robust error handling
 - Comprehensive logging
 - Scalable architecture
+- Clear architectural boundaries
+
+---
+
+## 🆕 Latest Architectural Improvements
+
+### Node Architecture Refactoring (Latest Update)
+
+This evening's development session introduced significant architectural improvements to FRAITMO's LangGraph pipeline:
+
+#### **🔧 Key Changes**
+
+1. **Separated Threat Search from KB Router**
+   - **Old**: Single `kb_router.py` handled both knowledge base loading AND threat searching
+   - **New**: Dedicated `rag_threat_searcher.py` node for threat search operations
+   - **Benefit**: Clear separation of responsibilities, easier testing and maintenance
+
+2. **Nomenclature Standardization**
+   - **RAG Nodes**: All knowledge base operations now use `rag_` prefix
+   - **LLM Nodes**: All direct LLM operations now use `llm_` prefix
+   - **Visual Clarity**: Immediate identification of processing path in logs and debugging
+
+3. **Enhanced State Schema**
+   - Updated all state keys to reflect new nomenclature
+   - Clear distinction between RAG and LLM processing results
+   - Better tracking of parallel path execution
+
+#### **📊 Before vs After**
+
+| Component | Before | After | Improvement |
+|-----------|--------|-------|------------|
+| **Nodes Count** | 9 nodes | 10 nodes | +1 specialized node |
+| **Threat Search** | Inside KB Router | Dedicated node | Separation of concerns |
+| **Nomenclature** | Mixed naming | `rag_` / `llm_` prefixes | Clear categorization |
+| **File Names** | `direct_*` pattern | `llm_*` pattern | Consistent naming |
+| **Architecture** | Implicit separation | Visual distinction | Enhanced clarity |
+
+#### **🎯 Immediate Benefits**
+
+- **Maintainability**: Each node has a single, clear responsibility
+- **Debugging**: Easier to trace issues to specific processing stages
+- **Extension**: Simple to add new threat search strategies or LLM analysis methods
+- **Documentation**: Self-documenting code with clear naming conventions
+- **Testing**: Individual nodes can be tested in isolation
+
+#### **🏗️ Architectural Excellence**
+
+The new architecture follows software engineering best practices:
+
+- **Single Responsibility Principle**: Each node handles one specific task
+- **Separation of Concerns**: Clear boundaries between RAG and LLM processing
+- **Naming Conventions**: Consistent and descriptive naming throughout
+- **Modular Design**: Easy to modify or replace individual components
+- **Visual Design**: Color-coded architecture diagrams for immediate understanding
 
 ---
 
@@ -542,4 +650,4 @@ python fraitmo.py --profile test_aic.xml
 
 ---
 
-**🚀 FRAITMO now operates completely independently of knowledge bases while maintaining comprehensive threat analysis capabilities through advanced LLM reasoning and parallel processing architecture.**
+**🚀 FRAITMO now features a refined 10-node architecture with clear RAG/LLM separation, operating completely independently of knowledge bases while maintaining comprehensive threat analysis capabilities through advanced LLM reasoning and enhanced parallel processing architecture.**
