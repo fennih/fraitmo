@@ -6,6 +6,10 @@ It parses DFDs, builds semantic models, and leverages **multiple LLM providers +
 
 **✨ New: Unified LLM Client with LM Studio support + Parallel LangGraph Architecture**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://opensource.org/)
+
 ---
 
 ## 🎯 Objectives
@@ -688,3 +692,19 @@ The new architecture follows software engineering best practices:
 ---
 
 **🚀 FRAITMO now features a refined 10-node architecture with clear RAG/LLM separation, operating completely independently of knowledge bases while maintaining comprehensive threat analysis capabilities through advanced LLM reasoning and enhanced parallel processing architecture.**
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+### What this means for you:
+- ✅ **Free to use** for personal and commercial projects
+- ✅ **Modify and distribute** as needed  
+- ✅ **No warranty** - use at your own risk
+- ⚠️ **Include license notice** in redistributions
+
+### Contributing
+By contributing to this project, you agree that your contributions will be licensed under the same MIT License.
+
