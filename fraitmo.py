@@ -6,6 +6,7 @@ Main application entry point using LangGraph pipeline
 
 import os
 import sys
+import argparse
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
@@ -179,12 +180,14 @@ def main():
     print("🚀 FRAITMO - Framework for Robust AI Threat Modeling Operations")
     print("="*80)
     
-    # Check for DFD file argument
-    if len(sys.argv) != 2:
-        print("❌ Usage: python fraitmo.py <path_to_dfd_file.xml>")
-        sys.exit(1)
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='FRAITMO - Framework for Robust AI Threat Modeling Operations')
+    parser.add_argument('dfd_file', help='Path to the DFD XML file')
+    parser.add_argument('--offline', action='store_true', 
+                       help='Run in offline mode (parsing and classification only, no LLM analysis)')
     
-    dfd_file = sys.argv[1]
+    args = parser.parse_args()
+    dfd_file = args.dfd_file
     
     # Validate DFD file exists
     if not os.path.exists(dfd_file):
@@ -198,10 +201,24 @@ def main():
     from rag.llm_client import UnifiedLLMClient
     
     try:
-        test_client = UnifiedLLMClient(preferred_model="foundation-sec")
+        test_client = UnifiedLLMClient()
+        
+        # Check if any models are available
+        if not test_client.available_models:
+            if args.offline:
+                print("🔌 Running in offline mode - parsing and classification only")
+            else:
+                print("❌ No LLM models found.")
+                print("💡 Start Ollama or LM Studio for full analysis, or use --offline for basic parsing.")
+                sys.exit(1)
+            
     except Exception as e:
-        print(f"⚠️ LLM detection failed: {e}")
-        print("💡 Make sure LM Studio or Ollama is running")
+        if args.offline:
+            print("🔌 Running in offline mode - LLM detection failed but continuing with parsing")
+        else:
+            print(f"❌ LLM detection failed: {e}")
+            print("💡 Start Ollama or LM Studio, or use --offline for basic parsing.")
+            sys.exit(1)
     
     # Run the complete analysis
     try:

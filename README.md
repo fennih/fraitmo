@@ -55,11 +55,18 @@ ollama pull foundation-sec:8b
 ```
 
 ### 4. Run Threat Analysis
+
+#### Full Analysis (requires LLM models)
 ```bash
 python fraitmo.py your_diagram.xml
 ```
 
-The system will automatically detect available LLM providers and use the best model for cybersecurity analysis.
+#### Offline Mode (parsing and classification only)
+```bash
+python fraitmo.py your_diagram.xml --offline
+```
+
+The system will automatically detect available LLM providers and use the best model for cybersecurity analysis. If no models are found, use `--offline` for basic DFD parsing and component classification.
 
 ---
 
@@ -71,9 +78,9 @@ FRAITMO features a **UnifiedLLMClient** that automatically detects and uses the 
 
 ```python
 # Auto-detection priority (highest to lowest):
-1. Foundation-Sec model on LM Studio (localhost:1234)
-2. Foundation-Sec model on Ollama (localhost:11434) 
-3. Cogito model on Ollama
+1. Cybersecurity-specialized models (containing 'sec', 'security' in name)
+2. LM Studio models (typically more recent)
+3. Ollama models
 4. Any available model on either provider
 ```
 
@@ -628,11 +635,41 @@ The new architecture follows software engineering best practices:
 
 ---
 
+## 🔄 Recent Updates
+
+### Version 2024.x - Enhanced Flexibility & User Experience
+
+#### **🎯 Model Flexibility**
+- **Removed hardcoded model preferences**: System now auto-selects best available model
+- **User-agnostic design**: Works with any local model (Foundation-Sec, Cogito, Llama, etc.)
+- **Intelligent prioritization**: Prefers cybersecurity-specialized models when available
+
+#### **🔌 Offline Mode Support**
+- **New `--offline` flag**: Run DFD parsing and classification without LLM models
+- **Graceful degradation**: Clear messaging when no models are available
+- **Early exit strategy**: Prevents unnecessary processing when LLMs are required but unavailable
+
+#### **🛠️ Improved User Experience**
+- **Single warning system**: Eliminated redundant "no models found" messages
+- **Clean exit behavior**: Tool terminates cleanly instead of continuing with limited functionality
+- **Better command line interface**: Added proper argument parsing with help messages
+
+#### **🍎 macOS Compatibility**
+- **Fixed urllib3 LibreSSL warning**: Pinned urllib3 to v1.x for macOS compatibility
+- **Resolved SSL warnings**: Clean output without OpenSSL compatibility warnings
+
+#### **📊 Technical Improvements**
+- **Singleton warning pattern**: Warning shown only once across all LLM client instances
+- **Enhanced error handling**: More robust LLM detection and graceful failures
+- **Modular initialization**: Better separation of concerns in LLM client setup
+
+---
+
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Set up LM Studio or Ollama with recommended models
-3. Test with provided sample DFDs
+2. Set up LM Studio or Ollama with any compatible model
+3. Test with provided sample DFDs (both online and offline modes)
 4. Extend direct analysis prompts for new threat types
 5. Add new LLM provider integrations
 6. Submit pull request with performance metrics

@@ -31,7 +31,7 @@ def llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         
         # Initialize LLM client
         try:
-            client = UnifiedLLMClient(preferred_model="foundation-sec")
+            client = UnifiedLLMClient()
         except Exception as e:
             print(f"   ❌ Failed to initialize LLM client: {e}")
             return {

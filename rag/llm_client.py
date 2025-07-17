@@ -26,6 +26,9 @@ class UnifiedLLMClient:
     Supports both Ollama and LM Studio with automatic fallback
     """
     
+    # Class variable to track if warning has been shown
+    _warning_shown = False
+    
     def __init__(self, preferred_model: Optional[str] = None):
         """
         Initialize the unified LLM client
@@ -33,19 +36,24 @@ class UnifiedLLMClient:
         Args:
             preferred_model: Preferred model name (will search across providers)
         """
-        self.preferred_model = preferred_model or "foundation-sec-8b"
+        self.preferred_model = preferred_model
         self.ollama_client = None
         self.lmstudio_base_url = "http://localhost:1234/v1"
         
         # Detect available services and models
         self.available_models = self._detect_available_models()
-        self.active_provider, self.active_model = self._select_best_model()
         
-        print(f"🤖 Using: {self.active_model} via {self.active_provider} ({len(self.available_models)} models available)")
+        if self.available_models:
+            self.active_provider, self.active_model = self._select_best_model()
+            print(f"🤖 Using: {self.active_model} via {self.active_provider}")
+        else:
+            self.active_provider, self.active_model = None, None
     
     def _detect_available_models(self) -> List[ModelInfo]:
         """Detect all available models across providers"""
         models = []
+        ollama_found = False
+        lmstudio_found = False
         
         # Check Ollama
         try:
@@ -63,7 +71,7 @@ class UnifiedLLMClient:
             
             ollama_count = len([m for m in models if m.provider == 'ollama'])
             if ollama_count > 0:
-                print(f"✅ Ollama: Found {ollama_count} models")
+                ollama_found = True
             
         except Exception as e:
             # Silently handle Ollama not being available
@@ -93,23 +101,29 @@ class UnifiedLLMClient:
             
             lms_count = len([m for m in models if m.provider == 'lmstudio'])
             if lms_count > 0:
-                print(f"✅ LM Studio: Found {lms_count} models")
+                lmstudio_found = True
             
         except Exception as e:
             # Silently handle LM Studio not being available
             pass
+        
+        # Only print warning once across all instances
+        if not models and not UnifiedLLMClient._warning_shown:
+            print("⚠️ Warning: No local LLM models found. Please start Ollama or LM Studio.")
+            UnifiedLLMClient._warning_shown = True
         
         return models
     
     def _select_best_model(self) -> tuple[str, str]:
         """Select the best available model based on preferences"""
         if not self.available_models:
-            raise Exception("No LLM providers available. Please start Ollama or LM Studio.")
+            return None, None
         
         # Priority 1: Preferred model if available
-        for model in self.available_models:
-            if self.preferred_model.lower() in model.name.lower():
-                return model.provider, model.name
+        if self.preferred_model:
+            for model in self.available_models:
+                if self.preferred_model.lower() in model.name.lower():
+                    return model.provider, model.name
         
         # Priority 2: Security-specialized models
         security_models = [m for m in self.available_models if m.specialized_for == "cybersecurity"]
@@ -140,6 +154,9 @@ class UnifiedLLMClient:
         Returns:
             Model response
         """
+        if not self.active_provider or not self.active_model:
+            return "Error: No LLM models available."
+        
         try:
             start_time = time.time()
             
@@ -277,6 +294,10 @@ Answer:"""
         Returns:
             True if successful
         """
+        if not self.available_models:
+            print("❌ No models available to switch to")
+            return False
+            
         for model in self.available_models:
             if model_name.lower() in model.name.lower():
                 self.active_provider = model.provider
@@ -289,6 +310,9 @@ Answer:"""
     
     def warm_up(self) -> bool:
         """Warm up the active model"""
+        if not self.active_provider or not self.active_model:
+            return False
+            
         try:
             print(f"🔥 Warming up {self.active_model} via {self.active_provider}...")
             
@@ -312,8 +336,8 @@ def test_unified_client():
     print("🧪 Testing Unified LLM Client...")
     
     try:
-        # Initialize client with preference for foundation-sec
-        client = UnifiedLLMClient(preferred_model="foundation-sec")
+        # Initialize client
+        client = UnifiedLLMClient()
         
         # Show model info
         info = client.get_model_info()

@@ -108,7 +108,7 @@ def llm_analysis_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         from rag.llm_client import UnifiedLLMClient
         
         # Initialize unified LLM client
-        client = UnifiedLLMClient(preferred_model="foundation-sec")
+        client = UnifiedLLMClient()
         
         # Get threats and components for analysis
         threats_found = state.get('threats_found', [])

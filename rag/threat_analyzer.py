@@ -48,8 +48,9 @@ class ThreatAnalyzer:
     def _initialize_rag_client(self):
         """Initialize the unified RAG client"""
         try:
-            self.client = UnifiedLLMClient(preferred_model="foundation-sec")
-            print("🤖 Unified RAG client initialized")
+            self.client = UnifiedLLMClient()
+            if self.client.active_provider:
+                print("🤖 RAG client initialized")
         except Exception as e:
             print(f"❌ Failed to initialize RAG client: {e}")
             self.client = None
