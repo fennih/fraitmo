@@ -1,138 +1,157 @@
 # AI Component Detection Node - Identifies AI/LLM/Agentic components in DFD
 
-from typing import Dict, List, Any
-from pipeline.state import ThreatAnalysisState
+from typing import Dict, Any, List
+from rich.console import Console
+from rich.text import Text
 
-def ai_component_detector_node(state: ThreatAnalysisState) -> Dict[str, Any]:
-    """
-    AI Component Detector Node
+console = Console()
+
+def ai_component_detector_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """AI Component Detection Node - Detects AI/LLM components in the DFD"""
+    console.print(Text("[INFO]", style="bold blue"), "AI Component Detector Node: Analyzing components...")
     
-    Automatically detects AI/LLM/Agentic components using pattern recognition
-    as defined in the README architecture.
-    
-    Args:
-        state: Current threat analysis state
-        
-    Returns:
-        Updated state with component classification
-    """
-    print("🤖 AI Component Detector Node: Analyzing components...")
+    dfd_model = state.get('dfd_model')
+    if not dfd_model:
+        error_msg = "No DFD model available for AI detection"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
     
     try:
-        dfd_model = state.get('dfd_model')
-        if not dfd_model:
-            return {
-                "errors": state.get('errors', []) + ["No DFD model available for AI detection"],
-                "processing_status": "error",
-                "current_node": "ai_detector"
-            }
-        
         ai_components = []
         traditional_components = []
-        component_classification = {}
         
-        # AI Component Indicators from README
-        ai_indicators = {
-            'names': ['llm', 'gpt', 'claude', 'ai', 'agent', 'model', 'chatbot', 'openai', 'anthropic', 'ollama'],
-            'types': ['llm service', 'ai agent', 'ml model', 'chatbot', 'language model'],
-            'vendors': ['openai', 'anthropic', 'hugging face', 'ollama', 'cohere']
-        }
+        # AI/LLM component detection keywords
+        ai_keywords = [
+            # Core AI/ML terms
+            'ai', 'artificial intelligence', 'machine learning', 'ml', 'neural network',
+            'deep learning', 'transformer', 'bert', 'gpt', 'llm', 'large language model',
+            
+            # AI services and frameworks
+            'openai', 'anthropic', 'claude', 'chatgpt', 'gemini', 'palm', 'cohere',
+            'huggingface', 'tensorflow', 'pytorch', 'scikit-learn', 'keras',
+            
+            # AI-specific components
+            'inference', 'prediction', 'model', 'embedding', 'vector', 'semantic',
+            'nlp', 'natural language', 'computer vision', 'speech', 'recommendation',
+            
+            # AI infrastructure
+            'ml ops', 'mlops', 'model registry', 'feature store', 'data pipeline',
+            'training', 'fine-tuning', 'prompt', 'agent', 'chatbot', 'assistant',
+            
+            # Specific AI services
+            'aws bedrock', 'azure cognitive', 'google ai', 'vertex ai', 'sagemaker',
+            'databricks', 'mlflow', 'kubeflow', 'ray', 'spark ml'
+        ]
         
-        # Traditional Component Indicators
-        traditional_indicators = {
-            'names': ['database', 'api', 'cache', 'load balancer', 'web server', 'auth'],
-            'types': ['database', 'web api', 'cache', 'load balancer', 'authentication'],
-            'vendors': ['aws', 'gcp', 'azure']  # Non-AI services
-        }
-        
-        # Analyze each component
-        for comp_id, component in dfd_model.components.items():
-            comp_name = component.name.lower()
-            comp_type = component.component_type.lower()
+        for component in dfd_model.components:
+            component_text = f"{component.name} {component.description}".lower()
+            is_ai_component = any(keyword in component_text for keyword in ai_keywords)
             
-            # Fix vendor handling - handle None values properly
-            comp_vendor = ''
-            if hasattr(component, 'vendor') and component.vendor:
-                comp_vendor = str(component.vendor).lower()
-            
-            is_ai = False
-            
-            # Check AI indicators
-            for indicator in ai_indicators['names']:
-                if indicator in comp_name:
-                    is_ai = True
-                    break
-            
-            if not is_ai:
-                for indicator in ai_indicators['types']:
-                    if indicator in comp_type:
-                        is_ai = True
-                        break
-            
-            if not is_ai:
-                for indicator in ai_indicators['vendors']:
-                    if indicator in comp_vendor or indicator in comp_name:
-                        is_ai = True
-                        break
-            
-            # Create component entry
-            comp_entry = {
-                "id": comp_id,
-                "name": component.name,
-                "type": component.component_type,
-                "trust_zone": component.trust_zone_name,
-                "is_external": component.is_external,
-                "vendor": comp_vendor,
-                "classification_reason": []
+            component_dict = {
+                'id': component.id,
+                'name': component.name,
+                'description': component.description,
+                'type': component.component_type,
+                'trust_zone': component.trust_zone
             }
             
-            if is_ai:
-                # Add reasons for AI classification
-                reasons = []
-                for indicator in ai_indicators['names']:
-                    if indicator in comp_name:
-                        reasons.append(f"Name contains '{indicator}'")
-                for indicator in ai_indicators['types']:
-                    if indicator in comp_type:
-                        reasons.append(f"Type contains '{indicator}'")
-                for indicator in ai_indicators['vendors']:
-                    if indicator in comp_vendor or indicator in comp_name:
-                        reasons.append(f"Vendor/name contains '{indicator}'")
-                
-                comp_entry["classification_reason"] = reasons
-                ai_components.append(comp_entry)
-                component_classification[comp_id] = "ai"
+            if is_ai_component:
+                # Enhanced AI component analysis
+                component_dict['ai_type'] = _classify_ai_component(component_text)
+                component_dict['risk_factors'] = _identify_ai_risk_factors(component_text)
+                ai_components.append(component_dict)
             else:
-                # Classify as traditional
-                reasons = ["No AI indicators found"]
-                comp_entry["classification_reason"] = reasons
-                traditional_components.append(comp_entry)
-                component_classification[comp_id] = "traditional"
+                traditional_components.append(component_dict)
         
-        print(f"✅ AI Detection Complete:")
-        print(f"   🤖 AI Components: {len(ai_components)}")
-        print(f"   🏗️ Traditional Components: {len(traditional_components)}")
+        # Store results in state
+        state['ai_components'] = ai_components
+        state['traditional_components'] = traditional_components
         
-        # Log AI components found
-        if ai_components:
-            print("   🤖 AI Components detected:")
-            for comp in ai_components:
-                print(f"     - {comp['name']} ({comp['type']}) - {', '.join(comp['classification_reason'])}")
-        
-        return {
-            "ai_components": ai_components,
-            "traditional_components": traditional_components,
-            "component_classification": component_classification,
-            "processing_status": "ai_detection_complete",
-            "current_node": "ai_detector"
+        # Enhanced component classification for better routing
+        state['component_classification'] = {
+            'total_components': len(dfd_model.components),
+            'ai_components_count': len(ai_components),
+            'traditional_components_count': len(traditional_components),
+            'ai_percentage': (len(ai_components) / len(dfd_model.components)) * 100 if dfd_model.components else 0
         }
         
+        console.print(Text("[OK]", style="bold green"), "AI Detection Complete:")
+        console.print(Text("[INFO]", style="bold blue"), f"AI Components: {len(ai_components)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Traditional Components: {len(traditional_components)}")
+        
+        # Show detected AI components for visibility
+        if ai_components:
+            console.print(Text("[INFO]", style="bold blue"), "AI Components detected:")
+            for comp in ai_components:
+                ai_type = comp.get('ai_type', 'Unknown')
+                console.print(f"  - {comp['name']} ({ai_type})")
+                
+                # Show risk factors if present
+                risk_factors = comp.get('risk_factors', [])
+                if risk_factors:
+                    console.print(f"    Risk factors: {', '.join(risk_factors)}")
+        
+        return state
+        
     except Exception as e:
-        print(f"❌ AI Detection Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "errors": state.get('errors', []) + [f"AI Detection failed: {str(e)}"],
-            "processing_status": "error",
-            "current_node": "ai_detector"
-        } 
+        error_msg = f"AI Detection Error: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
+
+
+def _classify_ai_component(component_text: str) -> str:
+    """Classify the type of AI component"""
+    if any(term in component_text for term in ['llm', 'language model', 'gpt', 'bert', 'transformer']):
+        return 'Language Model'
+    elif any(term in component_text for term in ['computer vision', 'image', 'cv', 'object detection']):
+        return 'Computer Vision'
+    elif any(term in component_text for term in ['recommendation', 'recommender', 'collaborative filtering']):
+        return 'Recommendation System'
+    elif any(term in component_text for term in ['chatbot', 'assistant', 'conversational', 'dialogue']):
+        return 'Conversational AI'
+    elif any(term in component_text for term in ['prediction', 'forecasting', 'regression', 'classification']):
+        return 'Predictive Model'
+    elif any(term in component_text for term in ['embedding', 'vector', 'semantic search', 'similarity']):
+        return 'Embedding/Vector System'
+    elif any(term in component_text for term in ['agent', 'autonomous', 'decision making']):
+        return 'AI Agent'
+    else:
+        return 'General AI/ML'
+
+
+def _identify_ai_risk_factors(component_text: str) -> List[str]:
+    """Identify specific risk factors for AI components"""
+    risk_factors = []
+    
+    # Data-related risks
+    if any(term in component_text for term in ['training data', 'dataset', 'data pipeline']):
+        risk_factors.append('Data poisoning')
+    
+    # Model-related risks
+    if any(term in component_text for term in ['model', 'inference', 'prediction']):
+        risk_factors.append('Model extraction')
+        risk_factors.append('Adversarial attacks')
+    
+    # Input-related risks
+    if any(term in component_text for term in ['user input', 'prompt', 'query', 'request']):
+        risk_factors.append('Prompt injection')
+        risk_factors.append('Input manipulation')
+    
+    # Output-related risks
+    if any(term in component_text for term in ['generation', 'response', 'output', 'result']):
+        risk_factors.append('Hallucination')
+        risk_factors.append('Bias amplification')
+    
+    # Privacy risks
+    if any(term in component_text for term in ['personal', 'user data', 'private', 'sensitive']):
+        risk_factors.append('Privacy leakage')
+        risk_factors.append('Data reconstruction')
+    
+    # External service risks
+    if any(term in component_text for term in ['api', 'service', 'external', 'third-party']):
+        risk_factors.append('Supply chain attacks')
+        risk_factors.append('Service dependency')
+    
+    return risk_factors 

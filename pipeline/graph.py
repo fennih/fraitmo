@@ -1,11 +1,15 @@
 # LangGraph Pipeline Definition - Defines nodes, edges, and execution flow for threat analysis
 
 import os
-from typing import Dict, Any
+import json
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import Graph, END
 from langgraph.checkpoint.memory import MemorySaver
+
+from rich.console import Console
+from rich.text import Text
 
 from pipeline.state import ThreatAnalysisState
 from pipeline.nodes.ai_detector import ai_component_detector_node
@@ -15,165 +19,170 @@ from pipeline.nodes.rag_mitigation_proposer import rag_mitigation_proposer_node
 from pipeline.nodes.llm_analyzer import llm_analyzer_node
 from pipeline.nodes.llm_mitigation_proposer import llm_mitigation_proposer_node
 
-from dfd_parser.xml_parser import extract_from_xml
-from models.builder import DFDBuilder
+from dfd_parser.xml_parser import parse_dfd
+from models.schema import DFDModel
+from models.builder import build_semantic_model
 
-def dfd_parser_node(state: ThreatAnalysisState) -> Dict[str, Any]:
-    """
-    DFD Parser Node - Parses DFD XML input
-    """
-    print("📋 DFD Parser Node: Parsing DFD XML...")
+console = Console()
+
+def dfd_parser_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse DFD XML file and extract components"""
+    console.print(Text("[INFO]", style="bold blue"), "DFD Parser Node: Parsing DFD XML...")
+    
+    dfd_file = state.get('dfd_file')
+    if not dfd_file:
+        error_msg = "No DFD file specified"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
     
     try:
-        xml_path = state.get('dfd_xml_path')
-        if not xml_path:
-            return {
-                "errors": state.get('errors', []) + ["No DFD XML path provided"],
-                "processing_status": "error",
-                "current_node": "dfd_parser"
-            }
+        # Parse the DFD XML file
+        parsed_data = parse_dfd(dfd_file)
         
-        # Parse XML using existing parser
-        parsed_data = extract_from_xml(xml_path)
-        
-        print(f"✅ DFD Parsed:")
-        print(f"   📊 Components: {len(parsed_data.get('components', {}))}")
-        print(f"   🔗 Connections: {len(parsed_data.get('connections', []))}")
-        print(f"   🏰 Trust Zones: {len(parsed_data.get('trust_zones', {}))}")
-        
-        return {
-            "parsed_data": parsed_data,
-            "processing_status": "dfd_parsed",
-            "current_node": "dfd_parser"
-        }
-        
-    except Exception as e:
-        print(f"❌ DFD Parser Error: {e}")
-        return {
-            "errors": state.get('errors', []) + [f"DFD parsing failed: {str(e)}"],
-            "processing_status": "error",
-            "current_node": "dfd_parser"
-        }
-
-
-def semantic_modeling_node(state: ThreatAnalysisState) -> Dict[str, Any]:
-    """
-    Semantic Modeling Node - Builds semantic DFD model
-    """
-    print("🏗️ Semantic Modeling Node: Building semantic model...")
-    
-    try:
-        parsed_data = state.get('parsed_data')
         if not parsed_data:
-            return {
-                "errors": state.get('errors', []) + ["No parsed data available for semantic modeling"],
-                "processing_status": "error",
-                "current_node": "semantic_modeling"
-            }
+            error_msg = "Failed to parse DFD file"
+            console.print(Text("[ERROR]", style="bold red"), error_msg)
+            state['errors'] = state.get('errors', []) + [error_msg]
+            return state
         
-        # Build semantic model using existing builder
-        builder = DFDBuilder()
-        dfd_model = builder.from_parser_output(parsed_data).build(
-            name="FRAITMO Threat Analysis",
-            description=f"Generated from {state.get('dfd_xml_path', 'DFD')}"
-        )
+        state['parsed_dfd'] = parsed_data
+        console.print(Text("[OK]", style="bold green"), "DFD Parsed:")
+        console.print(Text("[INFO]", style="bold blue"), f"Components: {len(parsed_data.get('components', {}))}")
+        console.print(Text("[INFO]", style="bold blue"), f"Connections: {len(parsed_data.get('connections', []))}")
+        console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries: {len(parsed_data.get('trust_boundaries', []))}")
         
-        print(f"✅ Semantic Model Built:")
-        print(f"   📊 Components: {len(dfd_model.components)}")
-        print(f"   🔗 Connections: {len(dfd_model.connections)}")
-        print(f"   🚨 Cross-zone connections: {len(dfd_model.cross_zone_connections)}")
-        
-        return {
-            "dfd_model": dfd_model,
-            "processing_status": "semantic_model_built",
-            "current_node": "semantic_modeling"
-        }
+        return state
         
     except Exception as e:
-        print(f"❌ Semantic Modeling Error: {e}")
-        return {
-            "errors": state.get('errors', []) + [f"Semantic modeling failed: {str(e)}"],
-            "processing_status": "error",
-            "current_node": "semantic_modeling"
-        }
+        error_msg = f"DFD Parser Error: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
 
 
-def llm_analysis_node(state: ThreatAnalysisState) -> Dict[str, Any]:
-    """
-    LLM Analysis Node - Contextualizes threats using UnifiedLLMClient
-    """
-    print("🤖 LLM Analysis Node: Analyzing threats with LLM...")
+def semantic_modeling_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Build semantic model from parsed DFD data"""
+    console.print(Text("[INFO]", style="bold blue"), "Semantic Modeling Node: Building semantic model...")
+    
+    parsed_dfd = state.get('parsed_dfd')
+    if not parsed_dfd:
+        error_msg = "No parsed DFD data available"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
     
     try:
-        from rag.llm_client import UnifiedLLMClient
+        # Build semantic model
+        dfd_model = build_semantic_model(parsed_dfd)
         
-        # Initialize unified LLM client
+        if not dfd_model:
+            error_msg = "Failed to build semantic model"
+            console.print(Text("[ERROR]", style="bold red"), error_msg)
+            state['errors'] = state.get('errors', []) + [error_msg]
+            return state
+        
+        state['dfd_model'] = dfd_model
+        console.print(Text("[OK]", style="bold green"), "Semantic Model Built:")
+        console.print(Text("[INFO]", style="bold blue"), f"Components: {len(dfd_model.components)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries: {len(dfd_model.trust_boundaries)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Cross-zone connections: {len(dfd_model.cross_zone_connections)}")
+        
+        return state
+        
+    except Exception as e:
+        error_msg = f"Semantic Modeling Error: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
+
+
+def llm_analysis_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Enhanced LLM Analysis Node with comprehensive threat analysis"""
+    console.print(Text("[INFO]", style="bold blue"), "LLM Analysis Node: Analyzing threats with LLM...")
+    
+    # Initialize LLM client
+    from rag.llm_client import UnifiedLLMClient
+    
+    try:
         client = UnifiedLLMClient()
         
-        # Get threats and components for analysis
+        # Get all available threats from both RAG and direct paths
         threats_found = state.get('threats_found', [])
-        ai_components = state.get('ai_components', [])
-        traditional_components = state.get('traditional_components', [])
-        dfd_model = state.get('dfd_model')
-        
         if not threats_found:
-            print("   ℹ️ No threats found to analyze")
-            return {
-                "threat_analysis": {"summary": "No threats identified for analysis"},
-                "risk_assessment": {"overall_risk": "low", "reason": "No threats detected"},
-                "processing_status": "llm_analysis_complete",
-                "current_node": "llm_analysis"
+            console.print(Text("[INFO]", style="bold blue"), "No threats found to analyze")
+            return state
+        
+        # Prepare threat analysis prompt
+        threat_summaries = []
+        for threat in threats_found:
+            summary = f"""
+Threat: {threat.get('name', 'Unknown')}
+Component: {threat.get('target_component', {}).get('name', 'Unknown')}
+Severity: {threat.get('severity', 'Unknown')}
+Description: {threat.get('description', 'No description')}
+"""
+            threat_summaries.append(summary)
+        
+        prompt = f"""
+You are a cybersecurity expert analyzing threats in an AI/LLM system architecture.
+Analyze the following {len(threats_found)} threats and provide:
+1. Overall risk assessment (Critical/High/Medium/Low)
+2. Risk level breakdown by threat count
+3. Key concerns and recommendations
+4. Priority mitigation areas
+
+THREATS TO ANALYZE:
+{chr(10).join(threat_summaries)}
+
+Provide a comprehensive analysis focusing on AI/LLM specific security concerns.
+"""
+        
+        # Generate LLM analysis
+        response = client.generate_response(prompt)
+        
+        if response:
+            # Extract risk level from response
+            risk_level = "Unknown"
+            if "Critical" in response:
+                risk_level = "Critical"
+            elif "High" in response:
+                risk_level = "High"
+            elif "Medium" in response:
+                risk_level = "Medium"
+            elif "Low" in response:
+                risk_level = "Low"
+            
+            # Count threats by severity
+            severity_counts = {}
+            for threat in threats_found:
+                severity = threat.get('severity', 'Unknown')
+                severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            
+            state['threat_analysis'] = {
+                'llm_response': response,
+                'model_used': client.active_model,
+                'provider_used': client.active_provider
             }
-        
-        # Create analysis prompt
-        prompt = create_threat_analysis_prompt(
-            threats_found, ai_components, traditional_components, dfd_model
-        )
-        
-        print(f"   📤 Sending {len(threats_found)} threats to LLM for analysis...")
-        response = client.query(prompt, max_tokens=800, temperature=0.1)
-        
-        # Simple risk assessment
-        risk_level = assess_risk_level(threats_found)
-        
-        threat_analysis = {
-            "llm_response": response,
-            "total_threats": len(threats_found),
-            "ai_threats_count": len(state.get('ai_threats', [])),
-            "traditional_threats_count": len(state.get('traditional_threats', [])),
-            "analysis_timestamp": "now",  # You could use actual timestamp
-            "model_used": f"{client.active_model} via {client.active_provider}"
-        }
-        
-        risk_assessment = {
-            "overall_risk": risk_level,
-            "threat_breakdown": {
-                "critical": len([t for t in threats_found if t.get('severity', '').lower() == 'critical']),
-                "high": len([t for t in threats_found if t.get('severity', '').lower() == 'high']),
-                "medium": len([t for t in threats_found if t.get('severity', '').lower() == 'medium']),
-                "low": len([t for t in threats_found if t.get('severity', '').lower() == 'low'])
+            
+            state['risk_assessment'] = {
+                'overall_risk': risk_level,
+                'threat_breakdown': severity_counts,
+                'total_threats': len(threats_found)
             }
-        }
+            
+            console.print(Text("[OK]", style="bold green"), "LLM Analysis Complete:")
+            console.print(Text("[INFO]", style="bold blue"), f"Threats Analyzed: {len(threats_found)}")
+            console.print(Text("[INFO]", style="bold blue"), f"Overall Risk: {risk_level}")
+            console.print(Text("[INFO]", style="bold blue"), f"Model Used: {client.active_model} via {client.active_provider}")
         
-        print(f"✅ LLM Analysis Complete:")
-        print(f"   📊 Threats Analyzed: {len(threats_found)}")
-        print(f"   🚨 Overall Risk: {risk_level}")
-        print(f"   🤖 Model Used: {client.active_model} via {client.active_provider}")
-        
-        return {
-            "threat_analysis": threat_analysis,
-            "risk_assessment": risk_assessment,
-            "processing_status": "llm_analysis_complete",
-            "current_node": "llm_analysis"
-        }
+        return state
         
     except Exception as e:
-        print(f"❌ LLM Analysis Error: {e}")
-        return {
-            "errors": state.get('errors', []) + [f"LLM analysis failed: {str(e)}"],
-            "processing_status": "error", 
-            "current_node": "llm_analysis"
-        }
+        error_msg = f"LLM Analysis Error: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
 
 
 def create_threat_analysis_prompt(threats, ai_components, traditional_components, dfd_model):
@@ -241,10 +250,10 @@ def create_fraitmo_graph():
     # Load environment variables
     load_dotenv()
     
-    print("🔄 Creating FRAITMO LangGraph pipeline...")
+    console.print(Text("[INFO]", style="bold blue"), "Creating FRAITMO LangGraph pipeline...")
     
     # Create the graph
-    workflow = StateGraph(ThreatAnalysisState)
+    workflow = Graph(ThreatAnalysisState)
     
     # Add nodes in the order of execution
     workflow.add_node("dfd_parser", dfd_parser_node)
@@ -282,7 +291,7 @@ def create_fraitmo_graph():
     checkpointer = MemorySaver()
     app = workflow.compile(checkpointer=checkpointer)
     
-    print("✅ FRAITMO LangGraph pipeline created successfully!")
+    console.print(Text("[OK]", style="bold green"), "FRAITMO LangGraph pipeline created successfully!")
     
     return app
 
@@ -295,8 +304,8 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
         dfd_xml_path: Path to DFD XML file
         config: Optional configuration for the graph execution
     """
-    print("🚀 Starting FRAITMO LangGraph Threat Analysis")
-    print("=" * 60)
+    console.print(Text("[INFO]", style="bold blue"), "Starting FRAITMO LangGraph Threat Analysis")
+    console.print("=" * 60)
     
     # Create the graph
     app = create_fraitmo_graph()
@@ -340,11 +349,11 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
     
     try:
         # Execute the graph
-        print("🔄 Executing LangGraph pipeline...")
+        console.print(Text("[INFO]", style="bold blue"), "Executing LangGraph pipeline...")
         result = app.invoke(initial_state, config=config)
         
-        print("\n🎉 FRAITMO Analysis Complete!")
-        print("=" * 60)
+        console.print(Text("[OK]", style="bold green"), "FRAITMO Analysis Complete!")
+        console.print("=" * 60)
         
         # Display summary
         display_analysis_summary(result)
@@ -352,7 +361,7 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
         return result
         
     except Exception as e:
-        print(f"❌ FRAITMO Analysis Failed: {e}")
+        console.print(Text("[ERROR]", style="bold red"), f"FRAITMO Analysis Failed: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -360,29 +369,29 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
 
 def display_analysis_summary(result):
     """Display a summary of the analysis results"""
-    print(f"\n📊 ANALYSIS SUMMARY:")
-    print(f"   Status: {result.get('processing_status', 'unknown')}")
-    print(f"   🤖 AI Components: {len(result.get('ai_components', []))}")
-    print(f"   🏗️ Traditional Components: {len(result.get('traditional_components', []))}")
+    console.print(Text("[INFO]", style="bold blue"), "ANALYSIS SUMMARY:")
+    console.print(f"Status: {result.get('processing_status', 'unknown')}")
+    console.print(Text("[INFO]", style="bold blue"), f"AI Components: {len(result.get('ai_components', []))}")
+    console.print(Text("[INFO]", style="bold blue"), f"Traditional Components: {len(result.get('traditional_components', []))}")
     
     # Combined threats and mitigations from both paths
     total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
     total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
     
-    print(f"   🚨 Total Threats Found: {total_threats}")
-    print(f"     📚 RAG Path: {len(result.get('threats_found', []))}")
-    print(f"     🧠 LLM Path: {len(result.get('llm_threats', []))}")
+    console.print(Text("[INFO]", style="bold blue"), f"Total Threats Found: {total_threats}")
+    console.print(f"  RAG Path: {len(result.get('threats_found', []))}")
+    console.print(f"  LLM Path: {len(result.get('llm_threats', []))}")
     
-    print(f"   💡 Total Mitigations: {total_mitigations}")
-    print(f"     📚 RAG Path: {len(result.get('rag_mitigations', []))}")
-    print(f"     🧠 LLM Path: {len(result.get('llm_mitigations', []))}")
+    console.print(Text("[INFO]", style="bold blue"), f"Total Mitigations: {total_mitigations}")
+    console.print(f"  RAG Path: {len(result.get('rag_mitigations', []))}")
+    console.print(f"  LLM Path: {len(result.get('llm_mitigations', []))}")
     
-    print(f"   🎯 Overall Risk: {result.get('risk_assessment', {}).get('overall_risk', 'unknown')}")
+    console.print(Text("[INFO]", style="bold blue"), f"Overall Risk: {result.get('risk_assessment', {}).get('overall_risk', 'unknown')}")
     
     if result.get('errors'):
-        print(f"   ❌ Errors: {len(result.get('errors', []))}")
+        console.print(Text("[ERROR]", style="bold red"), f"Errors: {len(result.get('errors', []))}")
         for error in result.get('errors', []):
-            print(f"     - {error}")
+            console.print(f"  - {error}")
 
 
 if __name__ == "__main__":
@@ -392,4 +401,4 @@ if __name__ == "__main__":
         dfd_path = sys.argv[1]
         run_fraitmo_analysis(dfd_path)
     else:
-        print("Usage: python pipeline/graph.py <path_to_dfd.xml>")
+        console.print(Text("[INFO]", style="bold blue"), "Usage: python pipeline/graph.py <path_to_dfd.xml>")

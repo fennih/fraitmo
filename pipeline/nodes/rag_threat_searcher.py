@@ -1,25 +1,22 @@
 # RAG Threat Searcher Node - Searches for relevant threats in loaded knowledge bases using RAG
 
-from typing import Dict, List, Any
-from pipeline.state import ThreatAnalysisState
+from typing import Dict, Any, List
+from rich.console import Console
+from rich.text import Text
 
+console = Console()
 
-def rag_threat_search_node(state: ThreatAnalysisState) -> Dict[str, Any]:
+def rag_threat_searcher_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     RAG Threat Search Node
-    
-    Searches for relevant threats in the loaded knowledge bases using RAG
-    based on component types and characteristics.
-    
-    Args:
-        state: Current threat analysis state
-        
-    Returns:
-        Updated state with found threats
+    Searches for relevant threats in loaded knowledge bases
     """
-    print("🔍 RAG Threat Search Node: Searching for relevant threats in knowledge base...")
+    console.print(Text("[INFO]", style="bold blue"), "RAG Threat Search Node: Searching for relevant threats in knowledge base...")
     
     try:
+        # Import here to avoid circular dependencies
+        from rag.document_loader import search_threats
+        
         ai_components = state.get('ai_components', [])
         traditional_components = state.get('traditional_components', [])
         ai_knowledge_base = state.get('ai_knowledge_base', [])
@@ -28,47 +25,53 @@ def rag_threat_search_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         ai_threats = []
         traditional_threats = []
         
-        # Search AI threats for AI components
+        # Search threats for AI components
         if ai_components and ai_knowledge_base:
-            print(f"   🤖 Searching AI threats for {len(ai_components)} AI components...")
+            console.print(Text("[INFO]", style="bold blue"), f"Searching AI threats for {len(ai_components)} AI components...")
             for component in ai_components:
-                component_threats = search_threats_for_component(
-                    component, ai_knowledge_base, "ai"
-                )
-                ai_threats.extend(component_threats)
+                # Build search query from component characteristics
+                search_query = f"{component.get('name', '')} {component.get('type', '')} {component.get('ai_type', '')}"
+                component_threats = search_threats(ai_knowledge_base, search_query, max_results=5)
+                
+                # Add component context to threats
+                for threat in component_threats:
+                    threat['target_component'] = component
+                    threat['source_path'] = 'rag_ai'
+                    ai_threats.append(threat)
         
-        # Search traditional threats for traditional components
+        # Search threats for traditional components
         if traditional_components and general_knowledge_base:
-            print(f"   🏗️ Searching general threats for {len(traditional_components)} traditional components...")
+            console.print(Text("[INFO]", style="bold blue"), f"Searching general threats for {len(traditional_components)} traditional components...")
             for component in traditional_components:
-                component_threats = search_threats_for_component(
-                    component, general_knowledge_base, "traditional"
-                )
-                traditional_threats.extend(component_threats)
+                search_query = f"{component.get('name', '')} {component.get('type', '')}"
+                component_threats = search_threats(general_knowledge_base, search_query, max_results=5)
+                
+                # Add component context to threats
+                for threat in component_threats:
+                    threat['target_component'] = component
+                    threat['source_path'] = 'rag_traditional'
+                    traditional_threats.append(threat)
         
-        # Combine all threats
+        # Combine all threats found
         all_threats = ai_threats + traditional_threats
         
-        print(f"✅ RAG Threat Search Complete:")
-        print(f"   🤖 AI Threats Found: {len(ai_threats)}")
-        print(f"   🏗️ Traditional Threats Found: {len(traditional_threats)}")
-        print(f"   📊 Total Threats: {len(all_threats)}")
+        # Store results in state
+        state['threats_found'] = all_threats
+        state['ai_threats'] = ai_threats
+        state['traditional_threats'] = traditional_threats
         
-        return {
-            "ai_threats": ai_threats,
-            "traditional_threats": traditional_threats,
-            "threats_found": all_threats,
-            "processing_status": "threats_searched",
-            "current_node": "rag_threat_search"
-        }
+        console.print(Text("[OK]", style="bold green"), "RAG Threat Search Complete:")
+        console.print(Text("[INFO]", style="bold blue"), f"AI Threats Found: {len(ai_threats)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Traditional Threats Found: {len(traditional_threats)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Total Threats: {len(all_threats)}")
+        
+        return state
         
     except Exception as e:
-        print(f"❌ RAG Threat Search Error: {e}")
-        return {
-            "errors": state.get('errors', []) + [f"RAG threat search failed: {str(e)}"],
-            "processing_status": "error",
-            "current_node": "rag_threat_search"
-        }
+        error_msg = f"RAG Threat Search Error: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
 
 
 def search_threats_for_component(component: Dict[str, Any], knowledge_base: List[Dict], threat_type: str) -> List[Dict[str, Any]]:

@@ -3,454 +3,238 @@ LLM Threat Analysis Node
 Analyzes DFD components directly with LLM without requiring knowledge base
 """
 
+import json
 from typing import Dict, Any, List
-from pipeline.state import ThreatAnalysisState
-from rag.llm_client import UnifiedLLMClient
+from rich.console import Console
+from rich.text import Text
 
+console = Console()
 
-def llm_analyzer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
-    """
-    LLM Analysis Node - Analyzes threats using only LLM reasoning
-    No knowledge base required, pure LLM threat modeling
-    """
-    print("🧠 LLM Analysis Node: Analyzing threats with pure LLM reasoning...")
+def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Direct LLM Analysis Node - Analyzes threats using pure LLM reasoning"""
+    console.print(Text("[INFO]", style="bold blue"), "LLM Analysis Node: Analyzing threats with pure LLM reasoning...")
     
     try:
-        # Get DFD data
+        # Check if we have DFD model
         dfd_model = state.get('dfd_model')
+        if not dfd_model:
+            console.print(Text("[WARN]", style="bold yellow"), "No DFD model available for direct analysis")
+            return state
+        
+        # Initialize LLM client
+        from rag.llm_client import UnifiedLLMClient
+        
+        try:
+            client = UnifiedLLMClient()
+            if not client.available_models:
+                console.print(Text("[ERROR]", style="bold red"), "Failed to initialize LLM client: {e}")
+                state['errors'] = state.get('errors', []) + [f"LLM client initialization failed"]
+                return state
+        except Exception as e:
+            console.print(Text("[ERROR]", style="bold red"), f"Failed to initialize LLM client: {e}")
+            state['errors'] = state.get('errors', []) + [f"LLM client initialization failed: {e}"]
+            return state
+        
+        # Perform comprehensive threat analysis
         ai_components = state.get('ai_components', [])
         traditional_components = state.get('traditional_components', [])
         
-        if not dfd_model:
-            print("   ⚠️ No DFD model available for direct analysis")
-            return {
-                "direct_threats": [],
-                "direct_mitigations": [],
-                "llm_analysis_status": "skipped"
-            }
+        # Initialize result collections
+        direct_threats = []
+        direct_mitigations = []
+        direct_analysis_summary = {}
         
-        # Initialize LLM client
-        try:
-            client = UnifiedLLMClient()
-        except Exception as e:
-            print(f"   ❌ Failed to initialize LLM client: {e}")
-            return {
-                "direct_threats": [],
-                "direct_mitigations": [],
-                "llm_analysis_status": "failed"
-            }
-        
-        # Analyze different aspects
-        threats = []
-        mitigations = []
-        
-        # 1. Analyze AI Components
+        # Analyze AI/LLM components (if any)
         if ai_components:
-            ai_threats, ai_mitigations = _analyze_ai_components(client, ai_components, dfd_model)
-            threats.extend(ai_threats)
-            mitigations.extend(ai_mitigations)
+            ai_analysis = _analyze_ai_components(client, ai_components, dfd_model)
+            direct_threats.extend(ai_analysis.get('threats', []))
+            direct_mitigations.extend(ai_analysis.get('mitigations', []))
+            direct_analysis_summary.update(ai_analysis.get('summary', {}))
         
-        # 2. Analyze Traditional Components
+        # Analyze traditional components
         if traditional_components:
-            trad_threats, trad_mitigations = _analyze_traditional_components(client, traditional_components, dfd_model)
-            threats.extend(trad_threats)
-            mitigations.extend(trad_mitigations)
+            traditional_analysis = _analyze_traditional_components(client, traditional_components, dfd_model)
+            direct_threats.extend(traditional_analysis.get('threats', []))
+            direct_mitigations.extend(traditional_analysis.get('mitigations', []))
         
-        # 3. Analyze Cross-Zone Communications
-        cross_threats, cross_mitigations = _analyze_cross_zone_communications(client, dfd_model)
-        threats.extend(cross_threats)
-        mitigations.extend(cross_mitigations)
+        # Store results in state
+        state['direct_threats'] = direct_threats
+        state['direct_mitigations_kb'] = direct_mitigations
+        state['direct_analysis_summary'] = direct_analysis_summary
         
-        # 4. Analyze Trust Boundaries
-        boundary_threats, boundary_mitigations = _analyze_trust_boundaries(client, dfd_model)
-        threats.extend(boundary_threats)
-        mitigations.extend(boundary_mitigations)
+        console.print(Text("[OK]", style="bold green"), f"LLM analysis complete: {len(direct_threats)} threats, {len(direct_mitigations)} mitigations")
         
-        print(f"   ✅ LLM analysis complete: {len(threats)} threats, {len(mitigations)} mitigations")
+        # Provide summary stats
+        if direct_analysis_summary:
+            ai_threat_count = direct_analysis_summary.get('ai_specific_threats', 0)
+            traditional_threat_count = direct_analysis_summary.get('traditional_threats', 0)
+            console.print(Text("[INFO]", style="bold blue"), f"AI-specific threats: {ai_threat_count}")
+            console.print(Text("[INFO]", style="bold blue"), f"Traditional threats: {traditional_threat_count}")
         
-        return {
-            "llm_threats": threats,
-            "llm_mitigations": mitigations,
-            "llm_analysis_summary": {
-                "total_threats": len(threats),
-                "total_mitigations": len(mitigations),
-                "ai_specific_threats": len([t for t in threats if t.get('category') == 'AI/LLM Security']),
-                "traditional_threats": len([t for t in threats if t.get('category') != 'AI/LLM Security'])
-            },
-            "llm_analysis_status": "complete"
-        }
+        return state
         
     except Exception as e:
-        print(f"   ❌ LLM analysis failed: {e}")
-        return {
-            "direct_threats": [],
-            "direct_mitigations": [],
-            "errors": state.get('errors', []) + [f"LLM analysis failed: {str(e)}"],
-            "llm_analysis_status": "error"
-        }
+        error_msg = f"LLM analysis failed: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
 
 
-def _analyze_ai_components(client: UnifiedLLMClient, ai_components: List[Dict], dfd_model) -> tuple[List[Dict], List[Dict]]:
+def _analyze_ai_components(client, ai_components: List[Dict], dfd_model) -> Dict[str, Any]:
     """Analyze AI/LLM components for specific threats"""
-    print("   🤖 Analyzing AI/LLM components...")
+    console.print(Text("[INFO]", style="bold blue"), "Analyzing AI/LLM components...")
     
     threats = []
     mitigations = []
     
     for component in ai_components:
-        component_name = component.get('name', 'Unknown AI Component')
-        component_type = component.get('type', 'AI Service')
-        trust_zone = component.get('trust_zone', 'Unknown')
-        
-        prompt = f"""You are a cybersecurity expert specializing in AI/LLM security threats.
-
-Analyze this AI component for security threats:
-- Component: {component_name}
-- Type: {component_type}
-- Trust Zone: {trust_zone}
-
-Focus on AI/LLM specific threats like:
-- Prompt injection attacks
-- Model poisoning
-- Data leakage through prompts
-- Adversarial inputs
-- Model inference attacks
-- Training data extraction
-
-Provide 3-5 specific threats in JSON format:
-[{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "impact": "potential_impact", "likelihood": "High/Medium/Low"}}]
-
-Only JSON, no additional text."""
-        
         try:
-            response = client.query(prompt, max_tokens=800, temperature=0.1)
+            component_name = component.get('name', 'Unknown AI Component')
+            ai_type = component.get('ai_type', 'General AI/ML')
+            risk_factors = component.get('risk_factors', [])
             
-            # Parse LLM response
-            component_threats = _parse_llm_threats_response(response, component_name, "AI/LLM Security")
-            threats.extend(component_threats)
+            # Create AI-specific threat analysis prompt
+            prompt = f"""
+You are a cybersecurity expert specializing in AI/LLM security. Analyze this AI component:
+
+COMPONENT: {component_name}
+TYPE: {ai_type}
+RISK FACTORS: {', '.join(risk_factors) if risk_factors else 'None identified'}
+
+Provide a JSON response with AI-specific threats and mitigations:
+{{
+    "threats": [
+        {{
+            "name": "threat name",
+            "severity": "Critical/High/Medium/Low",
+            "description": "detailed description",
+            "likelihood": "High/Medium/Low",
+            "impact": "detailed impact analysis",
+            "ai_specific": true
+        }}
+    ],
+    "mitigations": [
+        {{
+            "name": "mitigation name",
+            "type": "preventive/detective/corrective",
+            "implementation": "how to implement",
+            "effectiveness": "High/Medium/Low"
+        }}
+    ]
+}}
+
+Focus on AI-specific threats like prompt injection, model extraction, adversarial attacks, hallucination, bias, data poisoning, etc.
+"""
             
-            # Generate mitigations for each threat
-            for threat in component_threats:
-                mitigation = _generate_mitigation_for_threat(client, threat, component)
-                if mitigation:
+            response = client.generate_response(prompt, max_tokens=800, temperature=0.1)
+            
+            try:
+                analysis = json.loads(response)
+                
+                # Process threats
+                component_threats = analysis.get('threats', [])
+                for threat in component_threats:
+                    threat['target_component'] = component_name
+                    threat['source'] = 'llm_direct'
+                    threat['component_type'] = 'ai'
+                    threats.append(threat)
+                
+                # Process mitigations
+                component_mitigations = analysis.get('mitigations', [])
+                for mitigation in component_mitigations:
+                    mitigation['target_component'] = component_name
+                    mitigation['source'] = 'llm_direct'
                     mitigations.append(mitigation)
-            
+                    
+            except json.JSONDecodeError:
+                console.print(Text("[WARN]", style="bold yellow"), f"Failed to parse LLM response for AI component {component_name}")
+                
         except Exception as e:
-            print(f"     ⚠️ Failed to analyze AI component {component_name}: {e}")
+            console.print(Text("[WARN]", style="bold yellow"), f"Failed to analyze AI component {component_name}: {e}")
     
-    return threats, mitigations
+    return {
+        'threats': threats,
+        'mitigations': mitigations,
+        'summary': {
+            'ai_specific_threats': len(threats),
+            'ai_components_analyzed': len(ai_components)
+        }
+    }
 
 
-def _analyze_traditional_components(client: UnifiedLLMClient, traditional_components: List[Dict], dfd_model) -> tuple[List[Dict], List[Dict]]:
-    """Analyze traditional infrastructure components"""
-    print("   🏗️ Analyzing traditional components...")
+def _analyze_traditional_components(client, traditional_components: List[Dict], dfd_model) -> Dict[str, Any]:
+    """Analyze traditional components for standard security threats"""
+    console.print(Text("[INFO]", style="bold blue"), "Analyzing traditional components...")
     
     threats = []
     mitigations = []
     
     for component in traditional_components:
-        component_name = component.get('name', 'Unknown Component')
-        component_type = component.get('type', 'Service')
-        trust_zone = component.get('trust_zone', 'Unknown')
-        
-        prompt = f"""You are a cybersecurity expert specializing in infrastructure security.
-
-Analyze this component for security threats:
-- Component: {component_name}
-- Type: {component_type}
-- Trust Zone: {trust_zone}
-
-Focus on traditional threats like:
-- SQL injection
-- Cross-site scripting (XSS)
-- Authentication bypasses
-- Authorization flaws
-- Network attacks
-- Data breaches
-
-Provide 2-4 specific threats in JSON format:
-[{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "impact": "potential_impact", "likelihood": "High/Medium/Low"}}]
-
-Only JSON, no additional text."""
-        
         try:
-            response = client.query(prompt, max_tokens=600, temperature=0.1)
+            component_name = component.get('name', 'Unknown Component')
+            component_type = component.get('type', 'Unknown')
             
-            # Parse LLM response
-            component_threats = _parse_llm_threats_response(response, component_name, "Infrastructure Security")
-            threats.extend(component_threats)
+            prompt = f"""
+You are a cybersecurity expert. Analyze this traditional component:
+
+COMPONENT: {component_name}
+TYPE: {component_type}
+
+Provide a JSON response with security threats and mitigations:
+{{
+    "threats": [
+        {{
+            "name": "threat name",
+            "severity": "Critical/High/Medium/Low", 
+            "description": "detailed description",
+            "likelihood": "High/Medium/Low",
+            "impact": "detailed impact analysis"
+        }}
+    ],
+    "mitigations": [
+        {{
+            "name": "mitigation name",
+            "type": "preventive/detective/corrective",
+            "implementation": "how to implement",
+            "effectiveness": "High/Medium/Low"
+        }}
+    ]
+}}
+
+Focus on traditional security threats like SQL injection, XSS, authentication bypass, privilege escalation, etc.
+"""
             
-            # Generate mitigations for each threat
-            for threat in component_threats:
-                mitigation = _generate_mitigation_for_threat(client, threat, component)
-                if mitigation:
+            response = client.generate_response(prompt, max_tokens=600, temperature=0.1)
+            
+            try:
+                analysis = json.loads(response)
+                
+                # Process threats
+                component_threats = analysis.get('threats', [])
+                for threat in component_threats:
+                    threat['target_component'] = component_name
+                    threat['source'] = 'llm_direct'
+                    threat['component_type'] = 'traditional'
+                    threats.append(threat)
+                
+                # Process mitigations
+                component_mitigations = analysis.get('mitigations', [])
+                for mitigation in component_mitigations:
+                    mitigation['target_component'] = component_name
+                    mitigation['source'] = 'llm_direct'
                     mitigations.append(mitigation)
-            
+                    
+            except json.JSONDecodeError:
+                console.print(Text("[WARN]", style="bold yellow"), f"Failed to parse LLM response for component {component_name}")
+                
         except Exception as e:
-            print(f"     ⚠️ Failed to analyze component {component_name}: {e}")
+            console.print(Text("[WARN]", style="bold yellow"), f"Failed to analyze component {component_name}: {e}")
     
-    return threats, mitigations
-
-
-def _analyze_cross_zone_communications(client: UnifiedLLMClient, dfd_model) -> tuple[List[Dict], List[Dict]]:
-    """Analyze communications crossing trust boundaries"""
-    print("   🔗 Analyzing cross-zone communications...")
-    
-    threats = []
-    mitigations = []
-    
-    if not hasattr(dfd_model, 'connections') or not dfd_model.connections:
-        return threats, mitigations
-    
-    # Find cross-zone connections
-    cross_zone_connections = []
-    for connection in dfd_model.connections:
-        # Get components by ID
-        source_component = dfd_model.components.get(connection.source_id)
-        target_component = dfd_model.components.get(connection.target_id)
-        
-        if source_component and target_component:
-            source_zone = getattr(source_component, 'trust_zone_name', 'Unknown')
-            target_zone = getattr(target_component, 'trust_zone_name', 'Unknown')
-            
-            if source_zone != target_zone and source_zone != 'Unknown' and target_zone != 'Unknown':
-                cross_zone_connections.append({
-                    'connection': connection,
-                    'source_component': source_component,
-                    'target_component': target_component,
-                    'source_zone': source_zone,
-                    'target_zone': target_zone
-                })
-    
-    if not cross_zone_connections:
-        return threats, mitigations
-    
-    # Analyze cross-zone threats
-    connections_desc = "\n".join([
-        f"- {conn['source_component'].name} ({conn['source_zone']}) → {conn['target_component'].name} ({conn['target_zone']})"
-        for conn in cross_zone_connections
-    ])
-    
-    prompt = f"""You are a cybersecurity expert specializing in network security and trust boundaries.
-
-Analyze these cross-trust-zone communications for security threats:
-{connections_desc}
-
-Focus on threats like:
-- Man-in-the-middle attacks
-- Network eavesdropping
-- Trust boundary violations
-- Privilege escalation
-- Data interception
-- Protocol-level attacks
-
-Provide 3-5 specific threats in JSON format:
-[{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "impact": "potential_impact", "likelihood": "High/Medium/Low"}}]
-
-Only JSON, no additional text."""
-    
-    try:
-        response = client.query(prompt, max_tokens=700, temperature=0.1)
-        
-        # Parse LLM response
-        cross_threats = _parse_llm_threats_response(response, "Cross-Zone Communications", "Network Security")
-        threats.extend(cross_threats)
-        
-        # Generate mitigations
-        for threat in cross_threats:
-            mitigation = _generate_network_mitigation(client, threat, cross_zone_connections)
-            if mitigation:
-                mitigations.append(mitigation)
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to analyze cross-zone communications: {e}")
-    
-    return threats, mitigations
-
-
-def _analyze_trust_boundaries(client: UnifiedLLMClient, dfd_model) -> tuple[List[Dict], List[Dict]]:
-    """Analyze trust boundaries for security weaknesses"""
-    print("   🏰 Analyzing trust boundaries...")
-    
-    threats = []
-    mitigations = []
-    
-    if not hasattr(dfd_model, 'trust_zones') or not dfd_model.trust_zones:
-        return threats, mitigations
-    
-    trust_zones_desc = "\n".join([
-        f"- {zone.name}: {getattr(zone, 'trust_level', 'Unknown')}"
-        for zone in dfd_model.trust_zones.values()
-    ])
-    
-    prompt = f"""You are a cybersecurity expert specializing in trust boundary analysis.
-
-Analyze these trust zones for security weaknesses:
-{trust_zones_desc}
-
-Focus on threats like:
-- Trust boundary bypasses
-- Privilege escalation between zones
-- Insufficient access controls
-- Zone-specific vulnerabilities
-- Trust level misconfigurations
-
-Provide 2-4 specific threats in JSON format:
-[{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "impact": "potential_impact", "likelihood": "High/Medium/Low"}}]
-
-Only JSON, no additional text."""
-    
-    try:
-        response = client.query(prompt, max_tokens=600, temperature=0.1)
-        
-        # Parse LLM response
-        boundary_threats = _parse_llm_threats_response(response, "Trust Boundaries", "Access Control")
-        threats.extend(boundary_threats)
-        
-        # Generate mitigations
-        for threat in boundary_threats:
-            mitigation = _generate_boundary_mitigation(client, threat, list(dfd_model.trust_zones.values()))
-            if mitigation:
-                mitigations.append(mitigation)
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to analyze trust boundaries: {e}")
-    
-    return threats, mitigations
-
-
-def _parse_llm_threats_response(response: str, component_name: str, category: str) -> List[Dict]:
-    """Parse LLM response into structured threats"""
-    import json
-    import re
-    
-    threats = []
-    
-    try:
-        # Extract JSON from response
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            parsed_threats = json.loads(json_str)
-            
-            for threat in parsed_threats:
-                if isinstance(threat, dict) and 'name' in threat:
-                    structured_threat = {
-                        'id': f"DIRECT_{len(threats)+1}",
-                        'name': threat.get('name', 'Unknown Threat'),
-                        'description': threat.get('description', ''),
-                        'severity': threat.get('severity', 'Medium'),
-                        'category': category,
-                        'component': component_name,
-                        'impact': threat.get('impact', ''),
-                        'likelihood': threat.get('likelihood', 'Medium'),
-                        'source': 'Direct LLM Analysis'
-                    }
-                    threats.append(structured_threat)
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to parse LLM response: {e}")
-        # Fallback: create a generic threat
-        threats.append({
-            'id': 'DIRECT_FALLBACK',
-            'name': f'Security Risk in {component_name}',
-            'description': f'LLM identified potential security risks but response parsing failed: {response[:200]}...',
-            'severity': 'Medium',
-            'category': category,
-            'component': component_name,
-            'source': 'Direct LLM Analysis (Fallback)'
-        })
-    
-    return threats
-
-
-def _generate_mitigation_for_threat(client: UnifiedLLMClient, threat: Dict, component: Dict) -> Dict:
-    """Generate specific mitigation for a threat"""
-    try:
-        prompt = f"""Generate a specific mitigation for this threat:
-
-Threat: {threat['name']}
-Description: {threat['description']}
-Component: {component.get('name', 'Unknown')}
-Severity: {threat['severity']}
-
-Provide mitigation in JSON format:
-{{"control": "mitigation_name", "description": "detailed_implementation", "priority": "Critical/High/Medium/Low", "effort": "Low/Medium/High", "implementation_time": "estimated_time"}}
-
-Only JSON, no additional text."""
-        
-        response = client.query(prompt, max_tokens=300, temperature=0.1)
-        
-        import json
-        import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            mitigation_data = json.loads(json_match.group())
-            mitigation_data['threat_id'] = threat['id']
-            mitigation_data['component'] = component.get('name', 'Unknown')
-            return mitigation_data
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to generate mitigation: {e}")
-    
-    return None
-
-
-def _generate_network_mitigation(client: UnifiedLLMClient, threat: Dict, connections: List[Dict]) -> Dict:
-    """Generate network-specific mitigation"""
-    try:
-        prompt = f"""Generate a network security mitigation for this cross-zone threat:
-
-Threat: {threat['name']}
-Description: {threat['description']}
-
-Provide mitigation in JSON format:
-{{"control": "mitigation_name", "description": "detailed_implementation", "priority": "Critical/High/Medium/Low", "effort": "Low/Medium/High", "implementation_time": "estimated_time"}}
-
-Only JSON, no additional text."""
-        
-        response = client.query(prompt, max_tokens=300, temperature=0.1)
-        
-        import json
-        import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            mitigation_data = json.loads(json_match.group())
-            mitigation_data['threat_id'] = threat['id']
-            mitigation_data['component'] = 'Network Communications'
-            return mitigation_data
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to generate network mitigation: {e}")
-    
-    return None
-
-
-def _generate_boundary_mitigation(client: UnifiedLLMClient, threat: Dict, trust_zones: List) -> Dict:
-    """Generate trust boundary specific mitigation"""
-    try:
-        prompt = f"""Generate a trust boundary mitigation for this threat:
-
-Threat: {threat['name']}
-Description: {threat['description']}
-
-Provide mitigation in JSON format:
-{{"control": "mitigation_name", "description": "detailed_implementation", "priority": "Critical/High/Medium/Low", "effort": "Low/Medium/High", "implementation_time": "estimated_time"}}
-
-Only JSON, no additional text."""
-        
-        response = client.query(prompt, max_tokens=300, temperature=0.1)
-        
-        import json
-        import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            mitigation_data = json.loads(json_match.group())
-            mitigation_data['threat_id'] = threat['id']
-            mitigation_data['component'] = 'Trust Boundaries'
-            return mitigation_data
-        
-    except Exception as e:
-        print(f"     ⚠️ Failed to generate boundary mitigation: {e}")
-    
-    return None 
+    return {
+        'threats': threats,
+        'mitigations': mitigations,
+        'summary': {
+            'traditional_threats': len(threats),
+            'traditional_components_analyzed': len(traditional_components)
+        }
+    } 

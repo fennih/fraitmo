@@ -3,93 +3,84 @@ LLM Mitigation Proposer Node
 Generates mitigation strategies directly using LLM without requiring knowledge base
 """
 
+import json
 from typing import Dict, Any, List
+from rich.console import Console
+from rich.text import Text
 from pipeline.state import ThreatAnalysisState
 from rag.llm_client import UnifiedLLMClient
 
+console = Console()
 
 def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
     LLM Mitigation Proposer Node - Generates mitigations using pure LLM reasoning
     No knowledge base required, pure LLM mitigation strategies
     """
-    print("🛡️ LLM Mitigation Node: Generating mitigations with pure LLM reasoning...")
+    console.print(Text("[INFO]", style="bold blue"), "LLM Mitigation Node: Generating mitigations with pure LLM reasoning...")
     
     try:
-        # Get threats from both sources
-        threats_found = state.get('threats_found', [])
-        llm_threats = state.get('llm_threats', [])
-        all_threats = threats_found + llm_threats
+        # Get all available threats from both paths
+        threats_found = state.get('threats_found', [])  # RAG path threats
+        llm_threats = state.get('llm_threats', [])      # Direct LLM threats
+        direct_threats = state.get('direct_threats', [])  # Current LLM analysis threats
         
-        # Get component data
-        ai_components = state.get('ai_components', [])
-        traditional_components = state.get('traditional_components', [])
-        dfd_model = state.get('dfd_model')
+        # Combine all threats for comprehensive mitigation generation
+        all_threats = threats_found + llm_threats + direct_threats
         
         if not all_threats:
-            print("   ℹ️ No threats found for mitigation generation")
-            return {
-                "llm_mitigations": [],
-                "llm_implementation_plan": {"status": "no_threats", "tasks": []},
-                "llm_mitigation_status": "no_threats"
-            }
+            console.print(Text("[INFO]", style="bold blue"), "No threats found for mitigation generation")
+            state['llm_mitigations'] = []
+            state['llm_implementation_plan'] = {}
+            state['llm_mitigation_summary'] = {}
+            return state
         
         # Initialize LLM client
         try:
             client = UnifiedLLMClient()
+            if not client.available_models:
+                raise Exception("No LLM models available")
         except Exception as e:
-            print(f"   ❌ Failed to initialize LLM client: {e}")
-            return {
-                "llm_mitigations": [],
-                "llm_implementation_plan": {"status": "llm_failed", "tasks": []},
-                "llm_mitigation_status": "failed"
-            }
+            console.print(Text("[ERROR]", style="bold red"), f"Failed to initialize LLM client: {e}")
+            state['errors'] = state.get('errors', []) + [f"LLM mitigation generation failed: {e}"]
+            return state
         
-        # Generate mitigations for all threats
+        # Generate comprehensive mitigations
+        console.print(Text("[INFO]", style="bold blue"), f"Generating mitigations for {len(all_threats)} threats...")
+        
         mitigations = []
-        implementation_tasks = []
         
-        print(f"   🎯 Generating mitigations for {len(all_threats)} threats...")
-        
-        # 1. Generate comprehensive mitigations for each threat
-        for threat in all_threats:
-            threat_mitigations = _generate_comprehensive_mitigations(client, threat, dfd_model)
-            mitigations.extend(threat_mitigations)
+        # 1. Generate threat-specific mitigations
+        threat_mitigations = _generate_threat_specific_mitigations(client, all_threats)
+        mitigations.extend(threat_mitigations)
         
         # 2. Generate architectural mitigations
-        if ai_components:
-            arch_mitigations = _generate_architectural_mitigations(client, ai_components, traditional_components, dfd_model)
-            mitigations.extend(arch_mitigations)
+        arch_mitigations = _generate_architectural_mitigations(client, state)
+        mitigations.extend(arch_mitigations)
         
         # 3. Generate defense-in-depth strategy
-        defense_mitigations = _generate_defense_in_depth_strategy(client, all_threats, dfd_model)
+        defense_mitigations = _generate_defense_in_depth_strategy(client, state)
         mitigations.extend(defense_mitigations)
         
         # 4. Generate implementation plan
         implementation_plan = _generate_implementation_plan(client, mitigations, all_threats)
         
-        print(f"   ✅ LLM mitigation generation complete: {len(mitigations)} mitigations")
+        # Store results
+        state['llm_mitigations'] = mitigations
+        state['llm_implementation_plan'] = implementation_plan
+        state['llm_mitigation_summary'] = _generate_mitigation_summary(mitigations, implementation_plan)
         
-        return {
-            "llm_mitigations": mitigations,
-            "llm_implementation_plan": implementation_plan,
-            "llm_mitigation_summary": {
-                "total_mitigations": len(mitigations),
-                "by_priority": _categorize_by_priority(mitigations),
-                "by_effort": _categorize_by_effort(mitigations),
-                "estimated_timeline": implementation_plan.get("timeline", "Unknown")
-            },
-            "llm_mitigation_status": "complete"
-        }
+        console.print(Text("[OK]", style="bold green"), f"LLM mitigation generation complete: {len(mitigations)} mitigations")
+        console.print(Text("[INFO]", style="bold blue"), f"Implementation plan: {implementation_plan.get('total_tasks', 0)} tasks")
+        console.print(Text("[INFO]", style="bold blue"), f"Estimated timeline: {implementation_plan.get('estimated_timeline', 'Unknown')}")
+        
+        return state
         
     except Exception as e:
-        print(f"   ❌ LLM mitigation generation failed: {e}")
-        return {
-            "llm_mitigations": [],
-            "llm_implementation_plan": {"status": "error", "tasks": []},
-            "errors": state.get('errors', []) + [f"LLM mitigation generation failed: {str(e)}"],
-            "llm_mitigation_status": "error"
-        }
+        error_msg = f"LLM mitigation generation failed: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        state['errors'] = state.get('errors', []) + [error_msg]
+        return state
 
 
 def _generate_comprehensive_mitigations(client: UnifiedLLMClient, threat: Dict, dfd_model) -> List[Dict]:
@@ -142,7 +133,7 @@ Only JSON, no additional text."""
             mitigations.append(mitigation)
         
     except Exception as e:
-        print(f"     ⚠️ Failed to generate mitigations for {threat_name}: {e}")
+        console.print(Text("[WARNING]", style="bold yellow"), f"Failed to generate mitigations for {threat_name}: {e}")
         # Fallback mitigation
         mitigations.append({
             'control': f'Security Review for {threat_name}',
@@ -207,7 +198,7 @@ Only JSON, no additional text."""
             mitigations.append(mitigation)
         
     except Exception as e:
-        print(f"     ⚠️ Failed to generate architectural mitigations: {e}")
+        console.print(Text("[WARNING]", style="bold yellow"), f"Failed to generate architectural mitigations: {e}")
     
     return mitigations
 
@@ -258,7 +249,7 @@ Only JSON, no additional text."""
             mitigations.append(mitigation)
         
     except Exception as e:
-        print(f"     ⚠️ Failed to generate defense-in-depth strategy: {e}")
+        console.print(Text("[WARNING]", style="bold yellow"), f"Failed to generate defense-in-depth strategy: {e}")
     
     return mitigations
 
@@ -304,7 +295,6 @@ Only JSON, no additional text."""
     try:
         response = client.query(prompt, max_tokens=800, temperature=0.1)
         
-        import json
         import re
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
         if json_match:
@@ -314,7 +304,7 @@ Only JSON, no additional text."""
             return plan
         
     except Exception as e:
-        print(f"     ⚠️ Failed to generate implementation plan: {e}")
+        console.print(Text("[WARNING]", style="bold yellow"), f"Failed to generate implementation plan: {e}")
     
     # Fallback plan
     return {
@@ -345,7 +335,6 @@ Only JSON, no additional text."""
 
 def _parse_mitigation_response(response: str, threat_id: str) -> List[Dict]:
     """Parse LLM mitigation response into structured mitigations"""
-    import json
     import re
     
     mitigations = []
@@ -378,7 +367,7 @@ def _parse_mitigation_response(response: str, threat_id: str) -> List[Dict]:
                     mitigations.append(structured_mitigation)
         
     except Exception as e:
-        print(f"     ⚠️ Failed to parse mitigation response: {e}")
+        console.print(Text("[WARNING]", style="bold yellow"), f"Failed to parse mitigation response: {e}")
     
     return mitigations
 

@@ -9,6 +9,12 @@ import time
 from typing import Dict, List, Optional, Literal
 from dataclasses import dataclass
 import json
+import httpx
+from typing import List, Dict, Any, Optional, Union
+from rich.console import Console
+from rich.text import Text
+
+console = Console()
 
 
 @dataclass
@@ -20,219 +26,175 @@ class ModelInfo:
     specialized_for: Optional[str] = None
 
 
+class LLMModel:
+    """Represents an LLM model with its provider and capabilities"""
+    def __init__(self, name: str, provider: str, url: str):
+        self.name = name
+        self.provider = provider  
+        self.url = url
+        self.is_cybersec = self._is_cybersecurity_model(name)
+    
+    def _is_cybersecurity_model(self, name: str) -> bool:
+        """Check if model name suggests cybersecurity specialization"""
+        cybersec_keywords = ['sec', 'security', 'cyber', 'threat', 'vuln']
+        return any(keyword in name.lower() for keyword in cybersec_keywords)
+    
+    def __repr__(self):
+        return f"LLMModel({self.name}, {self.provider}, cybersec={self.is_cybersec})"
+
+
 class UnifiedLLMClient:
-    """
-    Unified LLM client that automatically detects and uses available services
-    Supports both Ollama and LM Studio with automatic fallback
-    """
+    """Unified client for multiple LLM providers with automatic fallback"""
     
-    # Class variable to track if warning has been shown
-    _warning_shown = False
+    # Class-level warning flag for singleton warning pattern
+    _no_models_warning_shown = False
     
-    def __init__(self, preferred_model: Optional[str] = None):
-        """
-        Initialize the unified LLM client
+    def __init__(self):
+        self.providers = {
+            'lm_studio': 'http://localhost:1234/v1/',
+            'ollama': 'http://localhost:11434/'
+        }
         
-        Args:
-            preferred_model: Preferred model name (will search across providers)
-        """
-        self.preferred_model = preferred_model
-        self.ollama_client = None
-        self.lmstudio_base_url = "http://localhost:1234/v1"
+        self.available_models: List[LLMModel] = []
+        self.active_model: Optional[str] = None
+        self.active_provider: Optional[str] = None
         
-        # Detect available services and models
-        self.available_models = self._detect_available_models()
+        self._detect_available_providers()
+    
+    def _detect_available_providers(self):
+        """Detect available LLM providers and models"""
+        for provider, base_url in self.providers.items():
+            try:
+                models = self._get_models_from_provider(provider, base_url)
+                if models:
+                    self.available_models.extend(models)
+                    console.print(Text("[INFO]", style="bold blue"), f"Found {len(models)} models in {provider}")
+            except Exception as e:
+                # Silent detection - only show warnings for critical issues
+                pass
         
         if self.available_models:
-            self.active_provider, self.active_model = self._select_best_model()
-            print(f"🤖 Using: {self.active_model} via {self.active_provider}")
+            # Priority: Cybersecurity models > LM Studio > Ollama > Any available
+            self._select_best_model()
+            console.print(Text("[OK]", style="bold green"), f"Using: {self.active_model} via {self.active_provider}")
         else:
-            self.active_provider, self.active_model = None, None
+            # Singleton warning pattern - only warn once per session
+            if not UnifiedLLMClient._no_models_warning_shown:
+                console.print(Text("[WARN]", style="bold yellow"), "No LLM models detected. Start Ollama or LM Studio.")
+                UnifiedLLMClient._no_models_warning_shown = True
     
-    def _detect_available_models(self) -> List[ModelInfo]:
-        """Detect all available models across providers"""
+    def _get_models_from_provider(self, provider: str, base_url: str) -> List[LLMModel]:
+        """Get available models from a specific provider"""
         models = []
-        ollama_found = False
-        lmstudio_found = False
         
-        # Check Ollama
         try:
-            self.ollama_client = ollama.Client()
-            ollama_models = self.ollama_client.list()
-            
-            if 'models' in ollama_models:
-                for model in ollama_models['models']:
-                    models.append(ModelInfo(
-                        name=model.get('name', model.get('model', 'unknown')),
-                        provider="ollama",
-                        size=model.get('size'),
-                        specialized_for="cybersecurity" if "cogito" in model.get('name', '') else None
-                    ))
-            
-            ollama_count = len([m for m in models if m.provider == 'ollama'])
-            if ollama_count > 0:
-                ollama_found = True
-            
-        except Exception as e:
-            # Silently handle Ollama not being available
-            self.ollama_client = None
-        
-        # Check LM Studio
-        try:
-            response = requests.get(f"{self.lmstudio_base_url}/models", timeout=5)
-            if response.status_code == 200:
-                lms_models = response.json()
-                
-                for model in lms_models.get('data', []):
-                    model_name = model.get('id', 'unknown')
-                    specialized = None
-                    
-                    # Detect specialization from model name
-                    if any(term in model_name.lower() for term in ['sec', 'security', 'foundation-sec']):
-                        specialized = "cybersecurity"
-                    elif any(term in model_name.lower() for term in ['code', 'llama']):
-                        specialized = "code"
-                    
-                    models.append(ModelInfo(
-                        name=model_name,
-                        provider="lmstudio",
-                        specialized_for=specialized
-                    ))
-            
-            lms_count = len([m for m in models if m.provider == 'lmstudio'])
-            if lms_count > 0:
-                lmstudio_found = True
-            
-        except Exception as e:
-            # Silently handle LM Studio not being available
+            if provider == 'lm_studio':
+                response = httpx.get(f"{base_url}models", timeout=3.0)
+                if response.status_code == 200:
+                    model_data = response.json()
+                    for model in model_data.get('data', []):
+                        models.append(LLMModel(
+                            name=model['id'], 
+                            provider=provider,
+                            url=base_url
+                        ))
+                        
+            elif provider == 'ollama':
+                response = httpx.get(f"{base_url}api/tags", timeout=3.0)
+                if response.status_code == 200:
+                    model_data = response.json()
+                    for model in model_data.get('models', []):
+                        models.append(LLMModel(
+                            name=model['name'],
+                            provider=provider, 
+                            url=base_url
+                        ))
+                        
+        except Exception:
+            # Silent failure for detection
             pass
-        
-        # Only print warning once across all instances
-        if not models and not UnifiedLLMClient._warning_shown:
-            print("⚠️ Warning: No local LLM models found. Please start Ollama or LM Studio.")
-            UnifiedLLMClient._warning_shown = True
-        
+            
         return models
     
-    def _select_best_model(self) -> tuple[str, str]:
-        """Select the best available model based on preferences"""
+    def _select_best_model(self):
+        """Select the best available model based on priority"""
         if not self.available_models:
-            return None, None
-        
-        # Priority 1: Preferred model if available
-        if self.preferred_model:
-            for model in self.available_models:
-                if self.preferred_model.lower() in model.name.lower():
-                    return model.provider, model.name
-        
-        # Priority 2: Security-specialized models
-        security_models = [m for m in self.available_models if m.specialized_for == "cybersecurity"]
-        if security_models:
-            # Prefer LM Studio for security models (typically newer)
-            lms_security = [m for m in security_models if m.provider == "lmstudio"]
-            if lms_security:
-                return lms_security[0].provider, lms_security[0].name
-            return security_models[0].provider, security_models[0].name
-        
-        # Priority 3: Any available model (prefer LM Studio)
-        lms_models = [m for m in self.available_models if m.provider == "lmstudio"]
-        if lms_models:
-            return lms_models[0].provider, lms_models[0].name
-        
-        # Fallback to first available
-        return self.available_models[0].provider, self.available_models[0].name
-    
-    def query(self, prompt: str, max_tokens: int = 512, temperature: float = 0.1) -> str:
-        """
-        Execute a query using the active provider
-        
-        Args:
-            prompt: Input prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
+            return
             
-        Returns:
-            Model response
-        """
-        if not self.active_provider or not self.active_model:
-            return "Error: No LLM models available."
+        # Priority 1: Cybersecurity specialized models
+        cybersec_models = [m for m in self.available_models if m.is_cybersec]
+        if cybersec_models:
+            # Prefer LM Studio cybersec models over Ollama
+            lm_cybersec = [m for m in cybersec_models if m.provider == 'lm_studio']
+            if lm_cybersec:
+                best_model = lm_cybersec[0]
+            else:
+                best_model = cybersec_models[0]
+        else:
+            # Priority 2: LM Studio models (generally more recent)
+            lm_models = [m for m in self.available_models if m.provider == 'lm_studio']
+            if lm_models:
+                best_model = lm_models[0]
+            else:
+                # Priority 3: Any available model
+                best_model = self.available_models[0]
+        
+        self.active_model = best_model.name
+        self.active_provider = best_model.provider
+    
+    def generate_response(self, prompt: str, max_tokens: int = 500, temperature: float = 0.1) -> str:
+        """Generate response using the active model"""
+        if not self.active_model:
+            raise Exception("No active model available")
+        
+        provider_url = self.providers[self.active_provider]
         
         try:
             start_time = time.time()
             
-            if self.active_provider == "ollama":
-                response = self._query_ollama(prompt, max_tokens, temperature)
-            elif self.active_provider == "lmstudio":
-                response = self._query_lmstudio(prompt, max_tokens, temperature)
+            if self.active_provider == 'lm_studio':
+                response = self._query_lm_studio(provider_url, prompt, max_tokens, temperature)
+            elif self.active_provider == 'ollama':
+                response = self._query_ollama(provider_url, prompt, max_tokens, temperature)
             else:
-                raise Exception(f"Unknown provider: {self.active_provider}")
+                raise Exception(f"Unsupported provider: {self.active_provider}")
             
             elapsed = time.time() - start_time
-            print(f"🤖 Generated response in {elapsed:.2f}s via {self.active_provider}")
+            console.print(Text("[OK]", style="bold green"), f"Generated response in {elapsed:.2f}s via {self.active_provider}")
             
             return response
             
         except Exception as e:
-            print(f"❌ Error with {self.active_provider}: {e}")
-            return self._fallback_query(prompt, max_tokens, temperature)
+            console.print(Text("[ERROR]", style="bold red"), f"Error with {self.active_provider}: {e}")
+            
+            # Try to fallback to another provider
+            return self._attempt_fallback(prompt, max_tokens, temperature)
     
-    def _query_ollama(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """Query using Ollama"""
-        response = self.ollama_client.generate(
-            model=self.active_model,
-            prompt=prompt,
-            options={
-                'temperature': temperature,
-                'num_predict': max_tokens,
-                'top_p': 0.9,
-                'stop': ['\n\n', '---']
-            }
-        )
-        return response['response'].strip()
-    
-    def _query_lmstudio(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """Query using LM Studio"""
-        payload = {
-            "model": self.active_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stop": ["\n\n", "---"]
-        }
+    def _attempt_fallback(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Attempt to use fallback providers if primary fails"""
+        console.print(Text("[INFO]", style="bold blue"), "Attempting fallback to alternative provider...")
         
-        response = requests.post(
-            f"{self.lmstudio_base_url}/chat/completions",
-            json=payload,
-            timeout=60
-        )
+        # Find alternative models
+        fallback_models = [m for m in self.available_models 
+                          if m.provider != self.active_provider]
         
-        if response.status_code == 200:
-            result = response.json()
-            return result['choices'][0]['message']['content'].strip()
-        else:
-            raise Exception(f"LM Studio API error: {response.status_code}")
-    
-    def _fallback_query(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """Try alternative provider if primary fails"""
-        print("🔄 Attempting fallback to alternative provider...")
+        for model in fallback_models:
+            try:
+                # Temporarily switch to fallback
+                original_model = self.active_model
+                original_provider = self.active_provider
+                
+                self.active_model = model.name
+                self.active_provider = model.provider
+                
+                console.print(Text("[OK]", style="bold green"), f"Fallback successful: {model.provider}/{model.name}")
+                return self.generate_response(prompt, max_tokens, temperature)
+                
+            except Exception as e:
+                console.print(Text("[WARN]", style="bold yellow"), f"Fallback failed for {model.provider}: {e}")
+                continue
         
-        # Try other available models
-        for model in self.available_models:
-            if model.provider != self.active_provider:
-                try:
-                    old_provider, old_model = self.active_provider, self.active_model
-                    self.active_provider, self.active_model = model.provider, model.name
-                    
-                    result = self.query(prompt, max_tokens, temperature)
-                    print(f"✅ Fallback successful: {model.provider}/{model.name}")
-                    return result
-                    
-                except Exception as e:
-                    print(f"⚠️ Fallback failed for {model.provider}: {e}")
-                    # Restore original
-                    self.active_provider, self.active_model = old_provider, old_model
-        
-        return f"Error: All LLM providers failed"
+        raise Exception("All providers failed")
     
     def rag_query(self, question: str, context: str, max_tokens: int = 256) -> str:
         """
@@ -247,7 +209,7 @@ class UnifiedLLMClient:
             Contextualized response
         """
         rag_prompt = self._build_rag_prompt(question, context)
-        return self.query(rag_prompt, max_tokens=max_tokens, temperature=0.1)
+        return self.generate_response(rag_prompt, max_tokens=max_tokens, temperature=0.1)
     
     def _build_rag_prompt(self, question: str, context: str) -> str:
         """Build optimized RAG prompt for threat modeling"""
@@ -277,7 +239,7 @@ Answer:"""
                 {
                     'name': m.name,
                     'provider': m.provider,
-                    'specialized_for': m.specialized_for
+                    'specialized_for': m.is_cybersec # Changed to is_cybersec
                 }
                 for m in self.available_models
             ],
@@ -295,17 +257,17 @@ Answer:"""
             True if successful
         """
         if not self.available_models:
-            print("❌ No models available to switch to")
+            console.print(Text("[ERROR]", style="bold red"), "No models available to switch to")
             return False
             
         for model in self.available_models:
             if model_name.lower() in model.name.lower():
                 self.active_provider = model.provider
                 self.active_model = model.name
-                print(f"🔄 Switched to {model.name} via {model.provider}")
+                console.print(Text("[OK]", style="bold green"), f"Switched to {model.name} via {model.provider}")
                 return True
         
-        print(f"❌ Model '{model_name}' not found")
+        console.print(Text("[ERROR]", style="bold red"), f"Model '{model_name}' not found")
         return False
     
     def warm_up(self) -> bool:
@@ -314,26 +276,26 @@ Answer:"""
             return False
             
         try:
-            print(f"🔥 Warming up {self.active_model} via {self.active_provider}...")
+            console.print(Text("[INFO]", style="bold blue"), f"Warming up {self.active_model} via {self.active_provider}...")
             
             warm_up_prompt = "What is cybersecurity?"
-            response = self.query(warm_up_prompt, max_tokens=50)
+            response = self.generate_response(warm_up_prompt, max_tokens=50)
             
             if response and not response.startswith("Error:"):
-                print("✅ Model warmed up successfully")
+                console.print(Text("[OK]", style="bold green"), "Model warmed up successfully")
                 return True
             else:
-                print("❌ Model warm-up failed")
+                console.print(Text("[ERROR]", style="bold red"), "Model warm-up failed")
                 return False
                 
         except Exception as e:
-            print(f"❌ Model warm-up failed: {e}")
+            console.print(Text("[ERROR]", style="bold red"), f"Model warm-up failed: {e}")
             return False
 
 
 def test_unified_client():
     """Test the unified LLM client"""
-    print("🧪 Testing Unified LLM Client...")
+    console.print(Text("[INFO]", style="bold blue"), "Testing Unified LLM Client...")
     
     try:
         # Initialize client
@@ -341,33 +303,33 @@ def test_unified_client():
         
         # Show model info
         info = client.get_model_info()
-        print(f"📊 Model info: {json.dumps(info, indent=2)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Model info: {json.dumps(info, indent=2)}")
         
         # Warm up
         client.warm_up()
         
         # Test basic query
         test_question = "What is SQL injection?"
-        response = client.query(test_question, max_tokens=100)
-        print(f"🔍 Test query: {test_question}")
-        print(f"🤖 Response: {response}")
+        response = client.generate_response(test_question, max_tokens=100)
+        console.print(Text("[INFO]", style="bold blue"), f"Test query: {test_question}")
+        console.print(Text("[OK]", style="bold green"), f"Response: {response}")
         
         # Test RAG query
         test_context = "SQL injection is a code injection technique that exploits vulnerabilities in data-driven applications."
         rag_response = client.rag_query(test_question, test_context, max_tokens=100)
-        print(f"🔍 RAG query: {test_question}")
-        print(f"🤖 RAG Response: {rag_response}")
+        console.print(Text("[INFO]", style="bold blue"), f"RAG query: {test_question}")
+        console.print(Text("[OK]", style="bold green"), f"RAG Response: {rag_response}")
         
         # Test model switching
-        print("\n🔄 Testing model switching...")
+        console.print(Text("[INFO]", style="bold blue"), "\nTesting model switching...")
         available_models = [m['name'] for m in info['available_models']]
         if len(available_models) > 1:
             client.switch_model(available_models[1])
-            switch_response = client.query("Hello", max_tokens=20)
-            print(f"🤖 Switch test: {switch_response}")
+            switch_response = client.generate_response("Hello", max_tokens=20)
+            console.print(Text("[OK]", style="bold green"), f"Switch test: {switch_response}")
         
     except Exception as e:
-        print(f"❌ Test failed: {e}")
+        console.print(Text("[ERROR]", style="bold red"), f"Test failed: {e}")
 
 
 if __name__ == "__main__":
