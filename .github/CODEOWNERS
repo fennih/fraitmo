@@ -1,0 +1,47 @@
+# CODEOWNERS file for FRAITMO
+# This file defines who must approve changes to specific files/directories
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global rule - require approval for all files
+* @fenniv
+
+# Core application files
+fraitmo.py @fenniv
+export_results.py @fenniv
+
+# Pipeline components - critical for threat analysis
+/pipeline/ @fenniv
+/pipeline/nodes/ @fenniv
+/pipeline/state.py @fenniv
+/pipeline/graph.py @fenniv
+
+# RAG and LLM components - core AI functionality  
+/rag/ @fenniv
+/rag/llm_client.py @fenniv
+/rag/threat_analyzer.py @fenniv
+
+# Data models and schemas
+/models/ @fenniv
+/models/schema.py @fenniv
+/models/builder.py @fenniv
+
+# DFD parsing - critical for input processing
+/dfd_parser/ @fenniv
+
+# Configuration and deployment
+requirements.txt @fenniv
+Dockerfile @fenniv
+docker-compose.yml @fenniv
+
+# Documentation and project files
+README.md @fenniv
+*.md @fenniv
+
+# GitHub configuration files
+/.github/ @fenniv
+
+# Security and sensitive files
+.env* @fenniv
+*.key @fenniv
+*.pem @fenniv
+*.crt @fenniv 

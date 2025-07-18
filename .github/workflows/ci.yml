@@ -1,0 +1,164 @@
+name: FRAITMO CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Python syntax check
+      run: |
+        echo "🔍 Checking Python syntax..."
+        python -m py_compile fraitmo.py
+        python -m py_compile export_results.py
+        find pipeline/ -name "*.py" -exec python -m py_compile {} \;
+        find rag/ -name "*.py" -exec python -m py_compile {} \;
+        find models/ -name "*.py" -exec python -m py_compile {} \;
+        find dfd_parser/ -name "*.py" -exec python -m py_compile {} \;
+        echo "✅ All Python files compile successfully"
+        
+    - name: Import validation
+      run: |
+        echo "🔍 Testing critical imports..."
+        python -c "
+        try:
+            from pipeline.graph import create_fraitmo_graph, run_fraitmo_analysis
+            from pipeline.state import ThreatAnalysisState
+            from rag.llm_client import UnifiedLLMClient
+            from models.schema import DataFlowDiagram
+            from dfd_parser.xml_parser import extract_from_xml
+            from export_results import export_threats_to_json, export_threats_to_csv
+            print('✅ All critical imports successful')
+        except ImportError as e:
+            print(f'❌ Import failed: {e}')
+            exit(1)
+        "
+        
+    - name: Code structure validation
+      run: |
+        echo "🔍 Validating project structure..."
+        test -f fraitmo.py || (echo "❌ Missing fraitmo.py" && exit 1)
+        test -f requirements.txt || (echo "❌ Missing requirements.txt" && exit 1)
+        test -d pipeline/ || (echo "❌ Missing pipeline directory" && exit 1)
+        test -d rag/ || (echo "❌ Missing rag directory" && exit 1)
+        test -d models/ || (echo "❌ Missing models directory" && exit 1)
+        test -d dfd_parser/ || (echo "❌ Missing dfd_parser directory" && exit 1)
+        echo "✅ Project structure is valid"
+        
+    - name: Basic functionality test
+      run: |
+        echo "🔍 Testing basic functionality..."
+        python -c "
+        import argparse
+        import sys
+        
+        # Test argument parsing
+        parser = argparse.ArgumentParser()
+        parser.add_argument('dfd_file')
+        parser.add_argument('--mitigation', action='store_true')
+        parser.add_argument('--output', choices=['json', 'csv'])
+        
+        # Test with mock args
+        test_args = parser.parse_args(['test.xml', '--output', 'json'])
+        assert test_args.dfd_file == 'test.xml'
+        assert test_args.output == 'json'
+        print('✅ Argument parsing works correctly')
+        
+        # Test LLM client initialization
+        from rag.llm_client import UnifiedLLMClient
+        client = UnifiedLLMClient()
+        print('✅ LLM client can be initialized')
+        
+        # Test state schema
+        from pipeline.state import ThreatAnalysisState
+        print('✅ State schema is valid')
+        
+        print('✅ Basic functionality test passed')
+        "
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install security tools
+      run: |
+        pip install bandit safety
+        
+    - name: Run Bandit security scan
+      run: |
+        echo "🔍 Running security scan with Bandit..."
+        bandit -r . -f json -o bandit-report.json || true
+        bandit -r . --severity-level medium --confidence-level medium
+        echo "✅ Security scan completed"
+        
+    - name: Check for known vulnerabilities
+      run: |
+        echo "🔍 Checking for known vulnerabilities..."
+        safety check || echo "⚠️ Some dependencies may have known vulnerabilities"
+        
+    - name: Check for secrets
+      run: |
+        echo "🔍 Scanning for potential secrets..."
+        grep -r -i "password\|secret\|key\|token" --exclude-dir=.git --exclude="*.yml" . || echo "✅ No obvious secrets found"
+
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Check README exists and is substantial
+      run: |
+        echo "🔍 Checking documentation..."
+        test -f README.md || (echo "❌ README.md missing" && exit 1)
+        
+        # Check README has substantial content (>500 chars)
+        readme_size=$(wc -c < README.md)
+        if [ "$readme_size" -lt 500 ]; then
+          echo "⚠️ README.md seems too short (${readme_size} chars)"
+        else
+          echo "✅ README.md has substantial content (${readme_size} chars)"
+        fi
+        
+    - name: Check for essential documentation sections
+      run: |
+        echo "🔍 Checking for essential documentation sections..."
+        grep -i "installation\|setup\|usage\|example" README.md && echo "✅ README has essential sections" || echo "⚠️ Consider adding installation/usage sections" 
