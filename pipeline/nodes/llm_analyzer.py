@@ -118,7 +118,9 @@ def _parse_partial_json_threats(response: str, component_name: str) -> Dict[str,
                 threat_obj = json.loads(threat_json)
                 threats.append(threat_obj)
                 
-            except:
+            except (json.JSONDecodeError, KeyError, AttributeError) as e:
+                # Skip invalid JSON objects but log the issue for debugging
+                console.print(Text("[DEBUG]", style="dim"), f"Skipped malformed threat object: {e}")
                 continue
         
         # Recovery attempt 2: Extract by pattern matching
