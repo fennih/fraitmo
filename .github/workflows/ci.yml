@@ -6,10 +6,18 @@ on:
   push:
     branches: [ main ]
 
+# Global permissions - restrict to minimum required
+permissions:
+  contents: read
+
 jobs:
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
+    
+    # Explicit permissions for this job - read-only access
+    permissions:
+      contents: read
     
     steps:
     - name: Checkout code
@@ -107,6 +115,10 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     
+    # Explicit permissions for security scanning - read-only access
+    permissions:
+      contents: read
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -140,6 +152,10 @@ jobs:
   documentation:
     name: Documentation Check
     runs-on: ubuntu-latest
+    
+    # Explicit permissions for documentation check - read-only access
+    permissions:
+      contents: read
     
     steps:
     - name: Checkout code
