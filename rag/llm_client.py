@@ -49,13 +49,14 @@ class UnifiedLLMClient:
     # Class-level warning flag for singleton warning pattern
     _no_models_warning_shown = False
     
-    def __init__(self):
+    def __init__(self, debug_mode: bool = False):
         self.providers = {
             'lm_studio': 'http://localhost:1234/v1/',
             'ollama': 'http://localhost:11434/'
         }
         
         self.available_models: List[LLMModel] = []
+        self.debug_mode = debug_mode
         self.active_model: Optional[str] = None
         self.active_provider: Optional[str] = None
         
@@ -65,13 +66,24 @@ class UnifiedLLMClient:
         """Detect available LLM providers and models"""
         for provider, base_url in self.providers.items():
             try:
-                models = self._get_models_from_provider(provider, base_url)
+                if provider == 'ollama':
+                    models = self._get_ollama_models()
+                elif provider == 'lm_studio':
+                    models = self._get_lm_studio_models()
+                else:
+                    models = []
+                
                 if models:
                     self.available_models.extend(models)
                     console.print(Text("[INFO]", style="bold blue"), f"Found {len(models)} models in {provider}")
+            except (requests.exceptions.RequestException, ConnectionError, TimeoutError) as e:
+                # Specific network/connection errors - silent for model detection
+                continue
             except Exception as e:
-                # Silent detection - only show warnings for critical issues
-                pass
+                # Unexpected errors should be logged for debugging
+                if self.debug_mode:
+                    console.print(Text("[DEBUG]", style="dim"), f"Model detection error for {provider}: {e}")
+                continue
         
         if self.available_models:
             # Priority: Cybersecurity models > LM Studio > Ollama > Any available
@@ -83,35 +95,56 @@ class UnifiedLLMClient:
                 console.print(Text("[WARN]", style="bold yellow"), "No LLM models detected. Start Ollama or LM Studio.")
                 UnifiedLLMClient._no_models_warning_shown = True
     
-    def _get_models_from_provider(self, provider: str, base_url: str) -> List[LLMModel]:
-        """Get available models from a specific provider"""
+    def _get_ollama_models(self) -> List[LLMModel]:
+        """Get available models from Ollama"""
         models = []
+        provider = 'ollama'
+        base_url = self.providers[provider]
         
         try:
-            if provider == 'lm_studio':
-                response = httpx.get(f"{base_url}models", timeout=3.0)
-                if response.status_code == 200:
-                    model_data = response.json()
-                    for model in model_data.get('data', []):
-                        models.append(LLMModel(
-                            name=model['id'], 
-                            provider=provider,
-                            url=base_url
-                        ))
-                        
-            elif provider == 'ollama':
-                response = httpx.get(f"{base_url}api/tags", timeout=3.0)
-                if response.status_code == 200:
-                    model_data = response.json()
-                    for model in model_data.get('models', []):
-                        models.append(LLMModel(
-                            name=model['name'],
-                            provider=provider, 
-                            url=base_url
-                        ))
-                        
-        except Exception:
-            # Silent failure for detection
+            response = requests.get(f"{base_url}api/tags", timeout=5)
+            if response.status_code == 200:
+                model_data = response.json()
+                for model in model_data.get('models', []):
+                    models.append(LLMModel(
+                        name=model['name'],
+                        provider=provider, 
+                        url=base_url
+                    ))
+        except (requests.exceptions.RequestException, ConnectionError, json.JSONDecodeError) as e:
+            # Expected errors during model detection - silently continue
+            pass
+        except Exception as e:
+            # Unexpected errors should be logged for debugging
+            if hasattr(self, 'debug_mode') and self.debug_mode:
+                console.print(Text("[DEBUG]", style="dim"), f"Unexpected error in model detection: {e}")
+            pass
+            
+        return models
+
+    def _get_lm_studio_models(self) -> List[LLMModel]:
+        """Get available models from LM Studio"""
+        models = []
+        provider = 'lm_studio'
+        base_url = self.providers[provider]
+        
+        try:
+            response = httpx.get(f"{base_url}models", timeout=3.0)
+            if response.status_code == 200:
+                model_data = response.json()
+                for model in model_data.get('data', []):
+                    models.append(LLMModel(
+                        name=model['id'], 
+                        provider=provider,
+                        url=base_url
+                    ))
+        except (requests.exceptions.RequestException, ConnectionError, json.JSONDecodeError) as e:
+            # Expected errors during model detection - silently continue
+            pass
+        except Exception as e:
+            # Unexpected errors should be logged for debugging
+            if hasattr(self, 'debug_mode') and self.debug_mode:
+                console.print(Text("[DEBUG]", style="dim"), f"Unexpected error in model detection: {e}")
             pass
             
         return models

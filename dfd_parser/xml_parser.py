@@ -1,4 +1,6 @@
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
+# Using defusedxml instead of xml.etree.ElementTree for security
+# This prevents XML external entity (XXE) attacks and other XML vulnerabilities
 
 def extract_from_xml(path):
     tree = ET.parse(path)
