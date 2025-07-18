@@ -24,9 +24,10 @@ def rag_mitigation_proposer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         
         if not threats_found and not ai_components and not traditional_components:
             console.print(Text("[INFO]", style="bold blue"), "No threats found - no mitigations needed")
-            state['rag_mitigations'] = []
-            state['rag_implementation_plan'] = {}
-            return state
+            return {
+                "rag_mitigations": [],
+                "rag_implementation_plan": {}
+            }
         
         # Load mitigation knowledge bases
         ai_mitigations_kb = []
@@ -74,21 +75,23 @@ def rag_mitigation_proposer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         implementation_plan = _generate_implementation_plan(prioritized_mitigations)
         
         # Store results
-        state['rag_mitigations'] = prioritized_mitigations
-        state['rag_implementation_plan'] = implementation_plan
+        # Results calculated above
         
         console.print(Text("[OK]", style="bold green"), "RAG Mitigation Proposal Complete:")
         console.print(Text("[INFO]", style="bold blue"), f"Mitigations Proposed: {len(prioritized_mitigations)}")
         console.print(Text("[INFO]", style="bold blue"), f"Implementation Tasks: {len(implementation_plan.get('tasks', []))}")
         console.print(Text("[INFO]", style="bold blue"), f"Estimated Timeline: {implementation_plan.get('timeline', 'Unknown')}")
         
-        return state
+        # Return only the fields we're modifying
+        return {
+            "rag_mitigations": prioritized_mitigations,
+            "rag_implementation_plan": implementation_plan
+        }
         
     except Exception as e:
         error_msg = f"RAG Mitigation Proposer Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
 
 
 def _prioritize_mitigations(mitigations: List[Dict]) -> List[Dict]:

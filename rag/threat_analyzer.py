@@ -11,7 +11,7 @@ from rich.text import Text
 # Import our document loader and LLM client
 from rag.document_loader import load_threat_knowledge_base, search_threats
 from rag.llm_client import UnifiedLLMClient
-from models.schema import DFDModel
+from models.schema import DataFlowDiagram
 
 console = Console()
 
@@ -106,7 +106,7 @@ Provide a brief analysis (2-3 sentences) of:
         
         return self.llm_client.generate_response(prompt, max_tokens=200, temperature=0.1)
     
-    def analyze_dfd_threats(self, dfd: DFDModel) -> Dict[str, Any]:
+    def analyze_dfd_threats(self, dfd: DataFlowDiagram) -> Dict[str, Any]:
         """
         Comprehensive threat analysis for entire DFD
         

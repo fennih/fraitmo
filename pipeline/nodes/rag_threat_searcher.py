@@ -56,22 +56,22 @@ def rag_threat_searcher_node(state: Dict[str, Any]) -> Dict[str, Any]:
         all_threats = ai_threats + traditional_threats
         
         # Store results in state
-        state['threats_found'] = all_threats
-        state['ai_threats'] = ai_threats
-        state['traditional_threats'] = traditional_threats
-        
         console.print(Text("[OK]", style="bold green"), "RAG Threat Search Complete:")
         console.print(Text("[INFO]", style="bold blue"), f"AI Threats Found: {len(ai_threats)}")
         console.print(Text("[INFO]", style="bold blue"), f"Traditional Threats Found: {len(traditional_threats)}")
         console.print(Text("[INFO]", style="bold blue"), f"Total Threats: {len(all_threats)}")
         
-        return state
+        # Return only the fields we're modifying
+        return {
+            "threats_found": all_threats,
+            "ai_threats": ai_threats,
+            "traditional_threats": traditional_threats
+        }
         
     except Exception as e:
         error_msg = f"RAG Threat Search Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
 
 
 def search_threats_for_component(component: Dict[str, Any], knowledge_base: List[Dict], threat_type: str) -> List[Dict[str, Any]]:

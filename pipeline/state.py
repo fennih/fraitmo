@@ -1,6 +1,8 @@
 # LangGraph State Schema - Defines the state structure for threat analysis pipeline
 
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Dict, List, Any, Optional, TypedDict, Annotated
+from typing_extensions import TypedDict
+import operator
 from models.schema import DataFlowDiagram
 
 class ThreatAnalysisState(TypedDict):
@@ -12,7 +14,7 @@ class ThreatAnalysisState(TypedDict):
     """
     
     # Input data
-    dfd_xml_path: Optional[str]  # Path to DFD XML file
+    dfd_xml_path: str  # Path to DFD XML file
     dfd_content: Optional[str]   # Raw DFD content
     
     # Parsed and processed data
@@ -20,24 +22,23 @@ class ThreatAnalysisState(TypedDict):
     dfd_model: Optional[DataFlowDiagram]          # Semantic DFD model
     
     # Component classification
-    ai_components: List[Dict[str, Any]]        # AI/LLM components
-    traditional_components: List[Dict[str, Any]]  # Traditional components
+    ai_components: Annotated[List[Dict[str, Any]], operator.add]        # AI/LLM components
+    traditional_components: Annotated[List[Dict[str, Any]], operator.add]  # Traditional components
     component_classification: Dict[str, Any]   # Classification metadata
     
     # Knowledge base data
-    ai_knowledge_base: List[Dict[str, Any]]      # AI-specific threat knowledge
-    general_knowledge_base: List[Dict[str, Any]]  # General threat knowledge
-    routing_strategy: List[str]                  # KB routing strategy used
+    ai_knowledge_base: Annotated[List[Dict[str, Any]], operator.add]      # AI-specific threat knowledge
+    general_knowledge_base: Annotated[List[Dict[str, Any]], operator.add]  # General threat knowledge
+    routing_strategy: Annotated[List[str], operator.add]                  # KB routing strategy used
     
     # Threat identification
-    threats_found: List[Dict[str, Any]]        # All identified threats
-    ai_threats: List[Dict[str, Any]]           # AI-specific threats
-    traditional_threats: List[Dict[str, Any]]   # Traditional threats
-    cross_zone_threats: List[Dict[str, Any]]   # Cross-zone threats
+    threats_found: Annotated[List[Dict[str, Any]], operator.add]        # All identified threats
+    ai_threats: Annotated[List[Dict[str, Any]], operator.add]           # AI-specific threats
+    traditional_threats: Annotated[List[Dict[str, Any]], operator.add]   # Traditional threats
+    cross_zone_threats: Annotated[List[Dict[str, Any]], operator.add]   # Cross-zone threats
     
     # LLM analysis (parallel path)
-    llm_threats: List[Dict[str, Any]]       # LLM identified threats
-    llm_mitigations: List[Dict[str, Any]]   # LLM mitigations
+    llm_threats: Annotated[List[Dict[str, Any]], operator.add]       # LLM identified threats
     llm_analysis_summary: Dict[str, Any]    # LLM analysis summary
     
     # LLM analysis
@@ -45,11 +46,11 @@ class ThreatAnalysisState(TypedDict):
     risk_assessment: Dict[str, Any]  # Risk assessment results
     
     # RAG mitigation proposal (from knowledge base)
-    rag_mitigations: List[Dict[str, Any]]         # Proposed mitigations (from KB)
+    rag_mitigations: Annotated[List[Dict[str, Any]], operator.add]         # Proposed mitigations (from KB)
     rag_implementation_plan: Dict[str, Any]       # Implementation plan with tasks
     
     # LLM mitigation proposal (parallel path)
-    llm_mitigations: List[Dict[str, Any]]         # LLM mitigations
+    llm_mitigations: Annotated[List[Dict[str, Any]], operator.add]         # LLM mitigations
     llm_implementation_plan: Dict[str, Any]       # LLM implementation plan
     llm_mitigation_summary: Dict[str, Any]        # LLM mitigation summary
     
@@ -61,8 +62,9 @@ class ThreatAnalysisState(TypedDict):
     llm_analysis_status: str     # LLM analysis status
     llm_mitigation_status: str   # LLM mitigation status
     current_node: str           # Current node being processed
-    errors: List[str]           # Error messages
-    warnings: List[str]         # Warning messages
+    errors: Annotated[List[str], operator.add]           # Error messages
+    warnings: Annotated[List[str], operator.add]         # Warning messages
     
     # Configuration (now handled by UnifiedLLMClient)
     # No specific LLM configuration needed - auto-detected
+    skip_mitigation: bool  # Flag to skip mitigation generation for faster execution

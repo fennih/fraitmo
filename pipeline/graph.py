@@ -5,7 +5,7 @@ import json
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
-from langgraph.graph import Graph, END
+from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from rich.console import Console
@@ -13,15 +13,15 @@ from rich.text import Text
 
 from pipeline.state import ThreatAnalysisState
 from pipeline.nodes.ai_detector import ai_component_detector_node
-from pipeline.nodes.kb_router import knowledge_base_router_node
-from pipeline.nodes.rag_threat_searcher import rag_threat_search_node
+from pipeline.nodes.kb_router import kb_router_node
+from pipeline.nodes.rag_threat_searcher import rag_threat_searcher_node
 from pipeline.nodes.rag_mitigation_proposer import rag_mitigation_proposer_node
 from pipeline.nodes.llm_analyzer import llm_analyzer_node
 from pipeline.nodes.llm_mitigation_proposer import llm_mitigation_proposer_node
 
-from dfd_parser.xml_parser import parse_dfd
-from models.schema import DFDModel
-from models.builder import build_semantic_model
+from dfd_parser.xml_parser import extract_from_xml
+from models.schema import DataFlowDiagram
+from models.builder import build_dfd_from_parser
 
 console = Console()
 
@@ -29,30 +29,28 @@ def dfd_parser_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Parse DFD XML file and extract components"""
     console.print(Text("[INFO]", style="bold blue"), "DFD Parser Node: Parsing DFD XML...")
     
-    dfd_file = state.get('dfd_file')
+    dfd_file = state.get('dfd_xml_path')
     if not dfd_file:
         error_msg = "No DFD file specified"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
     
     try:
         # Parse the DFD XML file
-        parsed_data = parse_dfd(dfd_file)
+        parsed_data = extract_from_xml(dfd_file)
         
         if not parsed_data:
             error_msg = "Failed to parse DFD file"
             console.print(Text("[ERROR]", style="bold red"), error_msg)
-            state['errors'] = state.get('errors', []) + [error_msg]
-            return state
+            return {"errors": [error_msg]}
         
-        state['parsed_dfd'] = parsed_data
         console.print(Text("[OK]", style="bold green"), "DFD Parsed:")
         console.print(Text("[INFO]", style="bold blue"), f"Components: {len(parsed_data.get('components', {}))}")
         console.print(Text("[INFO]", style="bold blue"), f"Connections: {len(parsed_data.get('connections', []))}")
         console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries: {len(parsed_data.get('trust_boundaries', []))}")
         
-        return state
+        # Return only the field we're modifying
+        return {"parsed_data": parsed_data}
         
     except Exception as e:
         error_msg = f"DFD Parser Error: {e}"
@@ -65,36 +63,33 @@ def semantic_modeling_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Build semantic model from parsed DFD data"""
     console.print(Text("[INFO]", style="bold blue"), "Semantic Modeling Node: Building semantic model...")
     
-    parsed_dfd = state.get('parsed_dfd')
-    if not parsed_dfd:
+    parsed_data = state.get('parsed_data')
+    if not parsed_data:
         error_msg = "No parsed DFD data available"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
     
     try:
         # Build semantic model
-        dfd_model = build_semantic_model(parsed_dfd)
+        dfd_model = build_dfd_from_parser(parsed_data)
         
         if not dfd_model:
             error_msg = "Failed to build semantic model"
             console.print(Text("[ERROR]", style="bold red"), error_msg)
-            state['errors'] = state.get('errors', []) + [error_msg]
-            return state
+            return {"errors": [error_msg]}
         
-        state['dfd_model'] = dfd_model
         console.print(Text("[OK]", style="bold green"), "Semantic Model Built:")
         console.print(Text("[INFO]", style="bold blue"), f"Components: {len(dfd_model.components)}")
-        console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries: {len(dfd_model.trust_boundaries)}")
-        console.print(Text("[INFO]", style="bold blue"), f"Cross-zone connections: {len(dfd_model.cross_zone_connections)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Trust zones: {len(dfd_model.trust_zones)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Connections: {len(dfd_model.connections)}")
         
-        return state
+        # Return only the field we're modifying
+        return {"dfd_model": dfd_model}
         
     except Exception as e:
         error_msg = f"Semantic Modeling Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
 
 
 def llm_analysis_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,10 +235,13 @@ def assess_risk_level(threats):
         return "low"
 
 
-def create_fraitmo_graph():
+def create_fraitmo_graph(skip_mitigation: bool = False):
     """
     Create the complete FRAITMO threat analysis graph
     
+    Args:
+        skip_mitigation: If True, skip mitigation generation for faster execution
+        
     Returns:
         Compiled LangGraph application
     """
@@ -253,14 +251,14 @@ def create_fraitmo_graph():
     console.print(Text("[INFO]", style="bold blue"), "Creating FRAITMO LangGraph pipeline...")
     
     # Create the graph
-    workflow = Graph(ThreatAnalysisState)
+    workflow = StateGraph(ThreatAnalysisState)
     
     # Add nodes in the order of execution
     workflow.add_node("dfd_parser", dfd_parser_node)
     workflow.add_node("semantic_modeling", semantic_modeling_node)
     workflow.add_node("ai_detector", ai_component_detector_node)
-    workflow.add_node("kb_router", knowledge_base_router_node)
-    workflow.add_node("rag_threat_search", rag_threat_search_node)
+    workflow.add_node("kb_router", kb_router_node)
+    workflow.add_node("rag_threat_search", rag_threat_searcher_node)
     workflow.add_node("llm_analysis", llm_analysis_node)
     workflow.add_node("llm_analyzer", llm_analyzer_node)
     workflow.add_node("rag_mitigation_proposer", rag_mitigation_proposer_node)
@@ -279,13 +277,20 @@ def create_fraitmo_graph():
     # Add parallel LLM analysis after ai_detector
     workflow.add_edge("ai_detector", "llm_analyzer")
     
-    # Both paths have their own mitigation proposers
-    workflow.add_edge("llm_analysis", "rag_mitigation_proposer")
-    workflow.add_edge("llm_analyzer", "llm_mitigation_proposer")
-    
-    # Both mitigation paths end
-    workflow.add_edge("rag_mitigation_proposer", END)
-    workflow.add_edge("llm_mitigation_proposer", END)
+    if skip_mitigation:
+        # Skip mitigation generation - end after threat analysis
+        workflow.add_edge("llm_analysis", END)
+        workflow.add_edge("llm_analyzer", END)
+        console.print(Text("[INFO]", style="bold blue"), "Mitigation generation disabled - threats only mode")
+    else:
+        # Both paths have their own mitigation proposers
+        workflow.add_edge("llm_analysis", "rag_mitigation_proposer")
+        workflow.add_edge("llm_analyzer", "llm_mitigation_proposer")
+        
+        # Both mitigation paths end
+        workflow.add_edge("rag_mitigation_proposer", END)
+        workflow.add_edge("llm_mitigation_proposer", END)
+        console.print(Text("[INFO]", style="bold blue"), "Full analysis mode - threats and mitigations")
     
     # Compile with memory saver for state persistence
     checkpointer = MemorySaver()
@@ -296,52 +301,55 @@ def create_fraitmo_graph():
     return app
 
 
-def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None):
+def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None, skip_mitigation: bool = False):
     """
     Run complete FRAITMO threat analysis
     
     Args:
         dfd_xml_path: Path to DFD XML file
         config: Optional configuration for the graph execution
+        skip_mitigation: If True, skip mitigation generation for faster execution
     """
     console.print(Text("[INFO]", style="bold blue"), "Starting FRAITMO LangGraph Threat Analysis")
     console.print("=" * 60)
     
     # Create the graph
-    app = create_fraitmo_graph()
+    app = create_fraitmo_graph(skip_mitigation=skip_mitigation)
     
-    # Initial state
-    initial_state = {
-        "dfd_xml_path": dfd_xml_path,
-        "dfd_content": None,
-        "dfd_model": None,
-        "parsed_data": None,
-        "ai_components": [],
-        "traditional_components": [],
-        "component_classification": {},
-        "ai_knowledge_base": [],
-        "general_knowledge_base": [],
-        "threats_found": [],
-        "ai_threats": [],
-        "traditional_threats": [],
-        "cross_zone_threats": [],
-        "llm_threats": [],
-        "llm_mitigations": [],
-        "llm_analysis_summary": {},
-        "threat_analysis": {},
-        "risk_assessment": {},
-        "rag_mitigations": [],
-        "rag_implementation_plan": {},
-        "llm_implementation_plan": {},
-        "llm_mitigation_summary": {},
-        "implementation_tracker": {},
-        "processing_status": "started",
-        "llm_analysis_status": "pending",
-        "llm_mitigation_status": "pending",
-        "current_node": "initializing",
-        "errors": [],
-        "warnings": []
-    }
+    # Initial state with all required fields
+    initial_state = ThreatAnalysisState(
+        dfd_xml_path=dfd_xml_path,
+        dfd_content=None,
+        dfd_model=None,
+        parsed_data=None,
+        ai_components=[],
+        traditional_components=[],
+        component_classification={},
+        ai_knowledge_base=[],
+        general_knowledge_base=[],
+        routing_strategy=[],
+        threats_found=[],
+        ai_threats=[],
+        traditional_threats=[],
+        cross_zone_threats=[],
+        llm_threats=[],
+        llm_analysis_summary={},
+        threat_analysis={},
+        risk_assessment={},
+        rag_mitigations=[],
+        rag_implementation_plan={},
+        llm_mitigations=[],
+        llm_implementation_plan={},
+        llm_mitigation_summary={},
+        implementation_tracker={},
+        processing_status="started",
+        llm_analysis_status="pending",
+        llm_mitigation_status="pending",
+        current_node="initializing",
+        errors=[],
+        warnings=[],
+        skip_mitigation=skip_mitigation
+    )
     
     # Configure execution
     if config is None:

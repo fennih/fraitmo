@@ -196,6 +196,59 @@ class UnifiedLLMClient:
         
         raise Exception("All providers failed")
     
+    def _query_lm_studio(self, provider_url: str, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Query LM Studio API"""
+        try:
+            payload = {
+                "model": self.active_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": False
+            }
+            
+            
+            response = requests.post(
+                f"{provider_url}chat/completions",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=120  # Increased timeout for longer responses
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'choices' in data and len(data['choices']) > 0:
+                    return data['choices'][0]['message']['content'].strip()
+                else:
+                    raise Exception("No valid response from LM Studio")
+            else:
+                raise Exception(f"LM Studio API error: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            raise Exception(f"LM Studio query failed: {e}")
+    
+    def _query_ollama(self, provider_url: str, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Query Ollama API"""
+        try:
+            client = ollama.Client(host=provider_url)
+            response = client.chat(
+                model=self.active_model,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={
+                    'num_predict': max_tokens,
+                    'temperature': temperature
+                }
+            )
+            
+            if 'message' in response and 'content' in response['message']:
+                return response['message']['content'].strip()
+            else:
+                raise Exception("No valid response from Ollama")
+                
+        except Exception as e:
+            raise Exception(f"Ollama query failed: {e}")
+    
     def rag_query(self, question: str, context: str, max_tokens: int = 256) -> str:
         """
         Execute a RAG query with context

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FRAITMO - Framework for Robust AI Threat Modeling Operations
-Main application entry point using LangGraph pipeline
+Main entry point for threat analysis pipeline
 """
 
 import os
@@ -12,8 +12,13 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.text import Text
 
+# Add the project root to Python path for imports
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
+
 # Import the complete pipeline
 from pipeline.graph import run_fraitmo_analysis
+from export_results import export_threats_to_json, export_threats_to_csv  # Export functions
 
 
 def format_components_summary(console: Console, ai_components, traditional_components):
@@ -42,11 +47,26 @@ def format_threat_summary(console: Console, threats_found, ai_threats, tradition
     console.print(Text("[INFO]", style="bold blue"), f"Traditional Threats: {len(traditional_threats)}")
     
     if threats_found:
-        console.print("Top Threats:")
-        for i, threat in enumerate(threats_found[:5], 1):
+        console.print("All Threats Found:")
+        for i, threat in enumerate(threats_found, 1):
             console.print(f"  {i}. {threat.get('name', 'Unknown Threat')}")
             console.print(f"     Severity: {threat.get('severity', 'Unknown')}")
-            console.print(f"     Target: {threat.get('target_component', {}).get('name', 'Unknown')}")
+            
+            # Handle target_component - can be string or dict
+            target_component = threat.get('target_component', 'Unknown')
+            if isinstance(target_component, dict):
+                target_name = target_component.get('name', 'Unknown')
+            else:
+                target_name = str(target_component)
+            console.print(f"     Target: {target_name}")
+            
+            # Add description for more context
+            description = threat.get('description', '')
+            if description:
+                # Truncate long descriptions
+                short_desc = description[:100] + '...' if len(description) > 100 else description
+                console.print(f"     Description: {short_desc}")
+            console.print()  # Empty line between threats
 
 
 def format_mitigation_summary(console: Console, mitigations, implementation_plan):
@@ -138,7 +158,7 @@ def display_results(result: Dict[str, Any]):
     )
     
     # Threat identification (combined from both paths)
-    all_threats = result.get('threats_found', []) + result.get('direct_threats', [])
+    all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
     format_threat_summary(
         console,
         all_threats,
@@ -153,13 +173,17 @@ def display_results(result: Dict[str, Any]):
         result.get('risk_assessment', {})
     )
     
-    # Mitigation proposal (combined from both paths)
-    all_mitigations = result.get('mitigations', []) + result.get('direct_mitigations_kb', [])
-    format_mitigation_summary(
-        console,
-        all_mitigations,
-        result.get('implementation_plan', {})
-    )
+    # Mitigation proposal (combined from both paths) - only if mitigations were generated
+    all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
+    if all_mitigations:
+        format_mitigation_summary(
+            console,
+            all_mitigations,
+            result.get('rag_implementation_plan', {}) or result.get('llm_implementation_plan', {})
+        )
+    else:
+        console.print(Text("[INFO]", style="bold blue"), "MITIGATION PROPOSAL:")
+        console.print(Text("[INFO]", style="dim"), "Mitigation generation skipped (use --mitigation flag to enable)")
     
     # Direct LLM Analysis Summary
     if result.get('direct_threats') or result.get('direct_mitigations_kb'):
@@ -181,29 +205,30 @@ def display_results(result: Dict[str, Any]):
 
 
 def main():
-    """Main application entry point"""
+    """Main entry point for FRAITMO analysis"""
     # Load environment variables
     load_dotenv()
     
     # Initialize rich console for styled output
     console = Console()
     
-    console.print(Text("[INFO]", style="bold blue"), "FRAITMO - Framework for Robust AI Threat Modeling Operations")
-    console.print("=" * 80)
-    
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='FRAITMO - Framework for Robust AI Threat Modeling Operations')
     parser.add_argument('dfd_file', help='Path to the DFD XML file')
-    parser.add_argument('--offline', action='store_true', 
-                       help='Run in offline mode (parsing and classification only, no LLM analysis)')
+    parser.add_argument('--mitigation', action='store_true', 
+                       help='Generate mitigations (slower, includes threat mitigation analysis)')
+    parser.add_argument('--output', choices=['json', 'csv'], 
+                       help='Output format: json or csv (default: display to screen)')
     
     args = parser.parse_args()
     dfd_file = args.dfd_file
     
-    # Validate DFD file exists
     if not os.path.exists(dfd_file):
-        console.print(Text("[ERROR]", style="bold red"), f"DFD file '{dfd_file}' not found")
+        console.print(Text("[ERROR]", style="bold red"), f"DFD file not found: {dfd_file}")
         sys.exit(1)
+    
+    console.print(Text("[INFO]", style="bold blue"), "FRAITMO - Framework for Robust AI Threat Modeling Operations")
+    console.print("=" * 80)
     
     # Initialize unified LLM client to detect available providers
     console.print(Text("[INFO]", style="bold blue"), "Detecting available LLM providers...")
@@ -214,37 +239,56 @@ def main():
         
         # Check if any models are available
         if not test_client.available_models:
-            if args.offline:
-                console.print(Text("[OK]", style="bold green"), "Running in offline mode - parsing and classification only")
-                console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
-            else:
-                console.print(Text("[ERROR]", style="bold red"), "No LLM models found")
-                console.print(Text("[HINT]", style="dim cyan"), "Start Ollama or LM Studio for full analysis, or use --offline for basic parsing")
-                sys.exit(1)
+            console.print(Text("[OK]", style="bold green"), "Running in offline mode - parsing and classification only")
+            console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
         else:
             console.print(Text("[OK]", style="bold green"), "LLM models detected")
             console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
             
     except Exception as e:
-        if args.offline:
-            console.print(Text("[WARN]", style="bold yellow"), "LLM detection failed but continuing in offline mode")
-            console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
-        else:
-            console.print(Text("[ERROR]", style="bold red"), f"LLM detection failed: {e}")
-            console.print(Text("[HINT]", style="dim cyan"), "Start Ollama or LM Studio, or use --offline for basic parsing")
-            sys.exit(1)
+        console.print(Text("[WARN]", style="bold yellow"), "LLM detection failed but continuing in offline mode")
+        console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
     
     # Run the complete analysis
     try:
-        result = run_fraitmo_analysis(dfd_file)
+        # Run the analysis
+        result = run_fraitmo_analysis(dfd_file, skip_mitigation=not args.mitigation)
         
         if result:
-            # Display results
-            display_results(result)
+            # Handle different output formats
+            if args.output == 'json':
+                # Export to JSON
+                json_file = export_threats_to_json(result)
+                console.print(Text("[OK]", style="bold green"), f"Threats exported to JSON: {json_file}")
+                
+                # Show quick summary
+                all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
+                console.print(Text("[INFO]", style="bold blue"), f"Total threats exported: {len(all_threats)}")
+                
+            elif args.output == 'csv':
+                # Export to CSV  
+                csv_file = export_threats_to_csv(result)
+                console.print(Text("[OK]", style="bold green"), f"Threats exported to CSV: {csv_file}")
+                
+                # Show quick summary
+                all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
+                console.print(Text("[INFO]", style="bold blue"), f"Total threats exported: {len(all_threats)}")
+                
+            else:
+                # Default: Display results to screen
+                display_results(result)
             
-            # Success message
-            console.print(Text("[OK]", style="bold green"), "Analysis completed successfully!")
-            console.print("=" * 80)
+            # Check if there were errors during analysis
+            errors = result.get('errors', [])
+            if errors:
+                console.print(Text("[WARN]", style="bold yellow"), f"Analysis completed with {len(errors)} error(s):")
+                for error in errors:
+                    console.print(Text("[ERROR]", style="bold red"), f"  - {error}")
+                console.print("=" * 80)
+            else:
+                # Success message only if no errors
+                console.print(Text("[OK]", style="bold green"), "Analysis completed successfully!")
+                console.print("=" * 80)
             
         else:
             console.print(Text("[ERROR]", style="bold red"), "Analysis failed - no results returned")
@@ -254,7 +298,7 @@ def main():
         console.print(Text("[WARN]", style="bold yellow"), "Analysis interrupted by user")
         sys.exit(1)
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"Analysis failed with error: {e}")
+        console.print(Text("[ERROR]", style="bold red"), f"Analysis failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -14,8 +14,7 @@ def ai_component_detector_node(state: Dict[str, Any]) -> Dict[str, Any]:
     if not dfd_model:
         error_msg = "No DFD model available for AI detection"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
     
     try:
         ai_components = []
@@ -44,16 +43,16 @@ def ai_component_detector_node(state: Dict[str, Any]) -> Dict[str, Any]:
             'databricks', 'mlflow', 'kubeflow', 'ray', 'spark ml'
         ]
         
-        for component in dfd_model.components:
+        for component in dfd_model.components.values():
             component_text = f"{component.name} {component.description}".lower()
             is_ai_component = any(keyword in component_text for keyword in ai_keywords)
             
             component_dict = {
                 'id': component.id,
                 'name': component.name,
-                'description': component.description,
+                'description': component.description or '',
                 'type': component.component_type,
-                'trust_zone': component.trust_zone
+                'trust_zone': component.trust_zone_id
             }
             
             if is_ai_component:
@@ -64,12 +63,8 @@ def ai_component_detector_node(state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 traditional_components.append(component_dict)
         
-        # Store results in state
-        state['ai_components'] = ai_components
-        state['traditional_components'] = traditional_components
-        
         # Enhanced component classification for better routing
-        state['component_classification'] = {
+        component_classification = {
             'total_components': len(dfd_model.components),
             'ai_components_count': len(ai_components),
             'traditional_components_count': len(traditional_components),
@@ -92,13 +87,17 @@ def ai_component_detector_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 if risk_factors:
                     console.print(f"    Risk factors: {', '.join(risk_factors)}")
         
-        return state
+        # Return only the fields we're modifying
+        return {
+            "ai_components": ai_components,
+            "traditional_components": traditional_components,
+            "component_classification": component_classification
+        }
         
     except Exception as e:
         error_msg = f"AI Detection Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
 
 
 def _classify_ai_component(component_text: str) -> str:

@@ -4,6 +4,7 @@ Generates mitigation strategies directly using LLM without requiring knowledge b
 """
 
 import json
+import re
 from typing import Dict, Any, List
 from rich.console import Console
 from rich.text import Text
@@ -11,6 +12,142 @@ from pipeline.state import ThreatAnalysisState
 from rag.llm_client import UnifiedLLMClient
 
 console = Console()
+
+def _clean_llm_json_response(response: str, component_name: str = "component") -> str:
+    """Clean LLM response to extract valid JSON, removing markdown and extra text"""
+    
+    # Remove markdown code blocks
+    response = re.sub(r'```(?:json)?\s*', '', response)
+    response = re.sub(r'```', '', response)
+    
+    # Try to find JSON object boundaries
+    start_brace = response.find('{')
+    if start_brace != -1:
+        # Find the last closing brace
+        brace_count = 0
+        end_pos = start_brace
+        for i, char in enumerate(response[start_brace:], start_brace):
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = i + 1
+                    break
+        
+        if end_pos > start_brace:
+            response = response[start_brace:end_pos]
+    
+    return response.strip()
+
+def _parse_partial_json_mitigations(response: str, component_name: str) -> Dict[str, Any]:
+    """
+    Advanced parser that recovers mitigations from partial/malformed JSON
+    Returns as many valid mitigations as possible
+    """
+    
+    mitigations = []
+    
+    try:
+        # First attempt: standard JSON parsing
+        cleaned_response = _clean_llm_json_response(response, component_name)
+        data = json.loads(cleaned_response)
+        
+        mitigations.extend(data.get('mitigations', []))
+        
+        return {
+            'mitigations': mitigations,
+            'recovery_method': 'full_json'
+        }
+        
+    except json.JSONDecodeError as e:
+        console.print(Text("[WARN]", style="bold yellow"), f"Full JSON parse failed for {component_name}, attempting mitigation recovery...")
+        
+        # Recovery attempt: Extract by pattern matching
+        name_pattern = r'"name"\s*:\s*"([^"]+)"'
+        type_pattern = r'"type"\s*:\s*"([^"]+)"'
+        implementation_pattern = r'"implementation"\s*:\s*"([^"]+)"'
+        effectiveness_pattern = r'"effectiveness"\s*:\s*"([^"]+)"'
+        
+        names = re.findall(name_pattern, response)
+        types = re.findall(type_pattern, response)
+        implementations = re.findall(implementation_pattern, response)
+        effectiveness = re.findall(effectiveness_pattern, response)
+        
+        # Combine extracted info into mitigation objects
+        for i, name in enumerate(names):
+            mitigation = {
+                'name': name,
+                'type': types[i] if i < len(types) else 'preventive',
+                'implementation': implementations[i] if i < len(implementations) else 'Implementation details not recovered',
+                'effectiveness': effectiveness[i] if i < len(effectiveness) else 'Unknown',
+                'recovered': True
+            }
+            mitigations.append(mitigation)
+        
+        if mitigations:
+            console.print(Text("[OK]", style="bold green"), f"Recovered {len(mitigations)} mitigations from malformed JSON for {component_name}")
+            return {
+                'mitigations': mitigations,
+                'recovery_method': 'partial_recovery'
+            }
+        else:
+            console.print(Text("[ERROR]", style="bold red"), f"Unable to recover any mitigations from response for {component_name}")
+            return {
+                'mitigations': [],
+                'recovery_method': 'failed'
+            }
+
+def _generate_threat_specific_mitigations(client: UnifiedLLMClient, threats: List[Dict]) -> List[Dict]:
+    """Generate specific mitigations for each identified threat"""
+    mitigations = []
+    
+    for threat in threats:
+        threat_name = threat.get('name', 'Unknown Threat')
+        threat_type = threat.get('type', 'general')
+        severity = threat.get('severity', 'Medium')
+        
+        prompt = f"""You are a cybersecurity expert. Generate specific mitigations for this threat:
+
+THREAT: {threat_name}
+TYPE: {threat_type}  
+SEVERITY: {severity}
+DESCRIPTION: {threat.get('description', 'No description available')}
+
+Provide a JSON response with specific mitigations:
+{{
+    "mitigations": [
+        {{
+            "name": "mitigation name",
+            "type": "preventive/detective/corrective",
+            "implementation": "detailed implementation steps",
+            "effectiveness": "High/Medium/Low",
+            "priority": "High/Medium/Low",
+            "cost": "High/Medium/Low"
+        }}
+    ]
+}}
+"""
+        
+        try:
+            response = client.generate_response(prompt, max_tokens=1500, temperature=0.1)
+            cleaned_response = _clean_llm_json_response(response, f"threat_{threat_name}")
+            
+            try:
+                data = json.loads(cleaned_response)
+                threat_mitigations = data.get('mitigations', [])
+                for mitigation in threat_mitigations:
+                    mitigation['target_threat'] = threat_name
+                    mitigation['source'] = 'llm_threat_specific'
+                mitigations.extend(threat_mitigations)
+                
+            except json.JSONDecodeError as e:
+                console.print(Text("[WARN]", style="bold yellow"), f"Failed to parse threat mitigation response for {threat_name}: {e}")
+                
+        except Exception as e:
+            console.print(Text("[WARN]", style="bold yellow"), f"Failed to generate mitigations for threat {threat_name}: {e}")
+    
+    return mitigations
 
 def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
     """
@@ -30,10 +167,11 @@ def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         
         if not all_threats:
             console.print(Text("[INFO]", style="bold blue"), "No threats found for mitigation generation")
-            state['llm_mitigations'] = []
-            state['llm_implementation_plan'] = {}
-            state['llm_mitigation_summary'] = {}
-            return state
+            return {
+                "llm_mitigations": [],
+                "llm_implementation_plan": {},
+                "llm_mitigation_summary": {}
+            }
         
         # Initialize LLM client
         try:
@@ -42,8 +180,7 @@ def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
                 raise Exception("No LLM models available")
         except Exception as e:
             console.print(Text("[ERROR]", style="bold red"), f"Failed to initialize LLM client: {e}")
-            state['errors'] = state.get('errors', []) + [f"LLM mitigation generation failed: {e}"]
-            return state
+            return {"errors": [f"LLM mitigation generation failed: {e}"]}
         
         # Generate comprehensive mitigations
         console.print(Text("[INFO]", style="bold blue"), f"Generating mitigations for {len(all_threats)} threats...")
@@ -55,32 +192,45 @@ def llm_mitigation_proposer_node(state: ThreatAnalysisState) -> Dict[str, Any]:
         mitigations.extend(threat_mitigations)
         
         # 2. Generate architectural mitigations
-        arch_mitigations = _generate_architectural_mitigations(client, state)
-        mitigations.extend(arch_mitigations)
+        ai_components = state.get('ai_components', [])
+        traditional_components = state.get('traditional_components', [])
+        dfd_model = state.get('dfd_model')
         
-        # 3. Generate defense-in-depth strategy
-        defense_mitigations = _generate_defense_in_depth_strategy(client, state)
-        mitigations.extend(defense_mitigations)
+        if dfd_model:
+            arch_mitigations = _generate_architectural_mitigations(client, ai_components, traditional_components, dfd_model)
+            mitigations.extend(arch_mitigations)
+            
+            # 3. Generate defense-in-depth strategy
+            defense_mitigations = _generate_defense_in_depth_strategy(client, all_threats, dfd_model)
+            mitigations.extend(defense_mitigations)
         
         # 4. Generate implementation plan
         implementation_plan = _generate_implementation_plan(client, mitigations, all_threats)
         
-        # Store results
-        state['llm_mitigations'] = mitigations
-        state['llm_implementation_plan'] = implementation_plan
-        state['llm_mitigation_summary'] = _generate_mitigation_summary(mitigations, implementation_plan)
+        # Generate summary
+        mitigation_summary = {
+            'total_mitigations': len(mitigations),
+            'mitigation_types': len(set(m.get('type', 'unknown') for m in mitigations)),
+            'high_priority': len([m for m in mitigations if m.get('priority', '').lower() == 'high']),
+            'implementation_tasks': implementation_plan.get('total_tasks', 0),
+            'timeline': implementation_plan.get('estimated_timeline', 'Unknown')
+        }
         
         console.print(Text("[OK]", style="bold green"), f"LLM mitigation generation complete: {len(mitigations)} mitigations")
         console.print(Text("[INFO]", style="bold blue"), f"Implementation plan: {implementation_plan.get('total_tasks', 0)} tasks")
         console.print(Text("[INFO]", style="bold blue"), f"Estimated timeline: {implementation_plan.get('estimated_timeline', 'Unknown')}")
         
-        return state
+        # Return only the fields we're modifying
+        return {
+            "llm_mitigations": mitigations,
+            "llm_implementation_plan": implementation_plan,
+            "llm_mitigation_summary": mitigation_summary
+        }
         
     except Exception as e:
         error_msg = f"LLM mitigation generation failed: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
+        return {"errors": [error_msg]}
 
 
 def _generate_comprehensive_mitigations(client: UnifiedLLMClient, threat: Dict, dfd_model) -> List[Dict]:
@@ -121,7 +271,7 @@ Focus on:
 Only JSON, no additional text."""
     
     try:
-        response = client.query(prompt, max_tokens=1000, temperature=0.1)
+        response = client.generate_response(prompt, max_tokens=1500, temperature=0.1)
         
         # Parse response
         parsed_mitigations = _parse_mitigation_response(response, threat.get('id', 'unknown'))
@@ -187,7 +337,7 @@ Focus on:
 Only JSON, no additional text."""
     
     try:
-        response = client.query(prompt, max_tokens=1000, temperature=0.1)
+        response = client.generate_response(prompt, max_tokens=1500, temperature=0.1)
         
         # Parse response
         parsed_mitigations = _parse_mitigation_response(response, 'ARCH')
@@ -238,7 +388,7 @@ Focus on layered security:
 Only JSON, no additional text."""
     
     try:
-        response = client.query(prompt, max_tokens=800, temperature=0.1)
+        response = client.generate_response(prompt, max_tokens=1200, temperature=0.1)
         
         # Parse response
         parsed_mitigations = _parse_mitigation_response(response, 'DEFENSE')
@@ -293,7 +443,7 @@ Focus on:
 Only JSON, no additional text."""
     
     try:
-        response = client.query(prompt, max_tokens=800, temperature=0.1)
+        response = client.generate_response(prompt, max_tokens=1200, temperature=0.1)
         
         import re
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
