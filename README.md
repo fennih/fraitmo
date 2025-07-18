@@ -659,7 +659,7 @@ The new architecture follows software engineering best practices:
 - **Better command line interface**: Added proper argument parsing with help messages
 
 #### **🍎 macOS Compatibility**
-- **Fixed urllib3 LibreSSL warning**: Pinned urllib3 to v1.x for macOS compatibility
+- **Updated urllib3**: Upgraded to v2.5.0+ for SSRF security fix (LibreSSL warning on macOS is non-critical)
 - **Resolved SSL warnings**: Clean output without OpenSSL compatibility warnings
 
 #### **Technical Improvements**
