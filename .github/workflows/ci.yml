@@ -45,7 +45,7 @@ jobs:
       run: |
         echo "🔍 Checking Python syntax..."
         python -m py_compile fraitmo.py
-        python -m py_compile export_results.py
+        find exporter/ -name "*.py" -exec python -m py_compile {} \;
         find pipeline/ -name "*.py" -exec python -m py_compile {} \;
         find rag/ -name "*.py" -exec python -m py_compile {} \;
         find models/ -name "*.py" -exec python -m py_compile {} \;
@@ -74,6 +74,7 @@ jobs:
         echo "🔍 Validating project structure..."
         test -f fraitmo.py || (echo "❌ Missing fraitmo.py" && exit 1)
         test -f requirements.txt || (echo "❌ Missing requirements.txt" && exit 1)
+        test -d exporter/ || (echo "❌ Missing exporter directory" && exit 1)
         test -d pipeline/ || (echo "❌ Missing pipeline directory" && exit 1)
         test -d rag/ || (echo "❌ Missing rag directory" && exit 1)
         test -d models/ || (echo "❌ Missing models directory" && exit 1)
