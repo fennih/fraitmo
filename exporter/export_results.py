@@ -15,8 +15,16 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Combine all threats from both paths
-    all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
+    # Use filtered results if quality filter was applied, otherwise use all threats
+    if result.get('quality_filter_applied', False):
+        all_threats = result.get('filtered_threats', [])
+        all_mitigations = result.get('filtered_mitigations', [])
+        threat_mitigation_mapping = result.get('threat_mitigation_mapping', {})
+    else:
+        # Fallback to original combined threats
+        all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
+        all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
+        threat_mitigation_mapping = {}
 
     # Create comprehensive export data
     export_data = {
@@ -26,8 +34,12 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
             "total_components": len(result.get('ai_components', [])) + len(result.get('traditional_components', [])),
             "ai_components": len(result.get('ai_components', [])),
             "traditional_components": len(result.get('traditional_components', [])),
+            "quality_filter_applied": result.get('quality_filter_applied', False),
+            "original_counts": result.get('original_counts', {}),
+            "filtered_counts": result.get('filtered_counts', {}),
             "errors": len(result.get('errors', [])),
-            "warnings": len(result.get('warnings', []))
+            "warnings": len(result.get('warnings', [])),
+            "overall_risk": result.get('overall_risk', 'Unknown') # Add overall_risk to metadata
         },
         "threats": {
             "total_count": len(all_threats),
@@ -38,10 +50,12 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
             "details": all_threats
         },
         "mitigations": {
-            "total_count": len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', [])),
+            "total_count": len(all_mitigations),
+            "filtered_mitigations": all_mitigations,
             "rag_mitigations": result.get('rag_mitigations', []),
             "llm_mitigations": result.get('llm_mitigations', [])
         },
+        "threat_mitigation_mapping": threat_mitigation_mapping,
         "components": {
             "ai_components": result.get('ai_components', []),
             "traditional_components": result.get('traditional_components', [])
@@ -69,8 +83,12 @@ def export_threats_to_csv(result: Dict[str, Any], output_dir: str = "results") -
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Combine all threats from both paths
-    all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
+    # Use filtered results if quality filter was applied
+    if result.get('quality_filter_applied', False):
+        all_threats = result.get('filtered_threats', [])
+    else:
+        # Fallback to original combined threats
+        all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
 
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
