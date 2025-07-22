@@ -142,4 +142,12 @@ Thumbs.db
 *.json
 logs/
 temp/
-tmp/ 
+tmp/
+
+# Knowledge base utility files
+KNOWLEDGE_BASE_GENERATION_PROMPT.md
+knowledge_base_builder.py
+
+# Generated data directories
+vector_db/
+results/
