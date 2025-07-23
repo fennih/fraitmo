@@ -19,6 +19,7 @@ from pipeline.nodes.rag_mitigation_proposer import rag_mitigation_proposer_node
 from pipeline.nodes.llm_analyzer import llm_analyzer_node
 from pipeline.nodes.llm_mitigation_proposer import llm_mitigation_proposer_node
 from pipeline.nodes.llm_quality_filter import llm_quality_filter_node
+from pipeline.nodes.cross_component_analyzer import cross_component_analyzer_node
 
 from dfd_parser.xml_parser import extract_from_xml
 from models.schema import DataFlowDiagram
@@ -136,6 +137,7 @@ def create_fraitmo_graph(skip_mitigation: bool = False):
     workflow.add_node("kb_router", kb_router_node)
     workflow.add_node("rag_threat_search", rag_threat_searcher_node)
     workflow.add_node("llm_analyzer", llm_analyzer_node)
+    workflow.add_node("cross_component_analyzer", cross_component_analyzer_node)  # New node
     workflow.add_node("rag_mitigation_proposer", rag_mitigation_proposer_node)
     workflow.add_node("llm_mitigation_proposer", llm_mitigation_proposer_node)
     workflow.add_node("quality_filter", llm_quality_filter_node)
@@ -154,19 +156,18 @@ def create_fraitmo_graph(skip_mitigation: bool = False):
     # Add parallel LLM analysis after ai_detector
     workflow.add_edge("ai_detector", "llm_analyzer")
 
+    # Add cross-component analysis after both threat identification paths
+    workflow.add_edge("rag_threat_search", "cross_component_analyzer")
+    workflow.add_edge("llm_analyzer", "cross_component_analyzer")
+
     if skip_mitigation:
-        # Skip mitigation generation - go directly to quality filter
-        # Remove the llm_analysis edge since we removed that node
-        # workflow.add_edge("llm_analysis", "quality_filter")
-        workflow.add_edge("rag_threat_search", "quality_filter")
-        workflow.add_edge("llm_analyzer", "quality_filter")
+        # Skip mitigation generation - go directly to quality filter from cross-component analyzer
+        workflow.add_edge("cross_component_analyzer", "quality_filter")
         console.print(Text("[INFO]", style="bold blue"), "Mitigation generation disabled - threats only mode")
     else:
-        # Both paths have their own mitigation proposers
-        # Remove the llm_analysis edge since we removed that node
-        # workflow.add_edge("llm_analysis", "rag_mitigation_proposer")
-        workflow.add_edge("rag_threat_search", "rag_mitigation_proposer")
-        workflow.add_edge("llm_analyzer", "llm_mitigation_proposer")
+        # Both paths have their own mitigation proposers after cross-component analysis
+        workflow.add_edge("cross_component_analyzer", "rag_mitigation_proposer")
+        workflow.add_edge("cross_component_analyzer", "llm_mitigation_proposer")
 
         # Both mitigation paths converge to quality filter
         workflow.add_edge("rag_mitigation_proposer", "quality_filter")
@@ -218,6 +219,9 @@ def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None, skip_
         cross_zone_threats=[],
         llm_threats=[],
         llm_analysis_summary={},
+        cross_component_threats=[],  # New field
+        trust_boundary_count=0,      # New field
+        data_flow_count=0,          # New field
         threat_analysis={},
         risk_assessment={},
         rag_mitigations=[],
