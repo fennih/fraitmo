@@ -26,6 +26,25 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
         all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
         threat_mitigation_mapping = {}
 
+    # Add cross-component threats to the export
+    cross_component_threats = result.get('cross_component_threats', [])
+    all_threats.extend(cross_component_threats)
+
+    # Add progressive numbering to threats
+    for i, threat in enumerate(all_threats, 1):
+        threat['threat_number'] = i
+        # Improve threat names to be more descriptive
+        threat['name'] = _improve_threat_name(threat)
+
+    # Categorize threats by type for better organization
+    threat_categories = {
+        'component_threats': [t for t in all_threats if t.get('threat_type') not in ['cross_component', 'ai_integration', 'external_dependency', 'authentication_flow']],
+        'cross_component_threats': [t for t in all_threats if t.get('threat_type') == 'cross_component'],
+        'ai_integration_threats': [t for t in all_threats if t.get('threat_type') == 'ai_integration'],
+        'external_dependency_threats': [t for t in all_threats if t.get('threat_type') == 'external_dependency'],
+        'authentication_flow_threats': [t for t in all_threats if t.get('threat_type') == 'authentication_flow']
+    }
+
     # Create comprehensive export data
     export_data = {
         "analysis_metadata": {
@@ -39,16 +58,27 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
             "filtered_counts": result.get('filtered_counts', {}),
             "errors": len(result.get('errors', [])),
             "warnings": len(result.get('warnings', [])),
-            "overall_risk": result.get('overall_risk', 'Unknown') # Add overall_risk to metadata
+            "overall_risk": result.get('overall_risk', 'Unknown'),
+            "trust_boundary_count": result.get('trust_boundary_count', 0),
+            "data_flow_count": result.get('data_flow_count', 0)
         },
         "threats": {
             "total_count": len(all_threats),
+            "by_category": {
+                "component_threats": len(threat_categories['component_threats']),
+                "cross_component_threats": len(threat_categories['cross_component_threats']),
+                "ai_integration_threats": len(threat_categories['ai_integration_threats']),
+                "external_dependency_threats": len(threat_categories['external_dependency_threats']),
+                "authentication_flow_threats": len(threat_categories['authentication_flow_threats'])
+            },
             "rag_threats": len(result.get('threats_found', [])),
             "llm_threats": len(result.get('llm_threats', [])),
+            "cross_component_threats": len(cross_component_threats),
             "ai_specific": len(result.get('ai_threats', [])),
             "traditional": len(result.get('traditional_threats', [])),
             "details": all_threats
         },
+        "threat_categories": threat_categories,
         "mitigations": {
             "total_count": len(all_mitigations),
             "filtered_mitigations": all_mitigations,
@@ -76,6 +106,110 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
         json.dump(export_data, f, indent=2, ensure_ascii=False)
 
     return filename
+
+def _improve_threat_name(threat: Dict[str, Any]) -> str:
+    """Generate a descriptive, specific threat name from the threat data"""
+
+    original_name = threat.get('name', 'Unknown Threat')
+    description = threat.get('description', '')
+    threat_type = threat.get('threat_type', 'component')
+    target_component = threat.get('target_component', 'Unknown')
+
+    # If the name is already specific and descriptive, keep it
+    generic_names = [
+        'authentication threat', 'authorization threat', 'data integrity threat',
+        'encryption threat', 'network threat', 'access control threat',
+        'privilege escalation', 'sql injection', 'xss', 'csrf', 'prompt injection'
+    ]
+
+    if original_name.lower() not in [name.lower() for name in generic_names]:
+        # Name is already specific, just clean it up
+        return _clean_threat_name(original_name)
+
+    # Generate more specific name based on context
+    if threat_type == 'cross_component':
+        source_comp = threat.get('source_component', '').split('(')[0].strip()
+        target_comp = threat.get('target_component', '').split('(')[0].strip()
+
+        if 'authentication' in original_name.lower():
+            return f"Weak Authentication Between {source_comp} and {target_comp}"
+        elif 'authorization' in original_name.lower():
+            return f"Insufficient Authorization Controls {source_comp}→{target_comp}"
+        elif 'data integrity' in original_name.lower():
+            return f"Data Corruption Risk in {source_comp}→{target_comp} Transit"
+        elif 'encryption' in original_name.lower():
+            return f"Unencrypted Data Flow {source_comp}→{target_comp}"
+        else:
+            return f"Trust Boundary Violation {source_comp}→{target_comp}"
+
+    elif threat_type == 'ai_integration':
+        ai_comp = threat.get('ai_component', '').split('(')[0].strip()
+        trad_comp = threat.get('traditional_component', '').split('(')[0].strip()
+
+        if 'prompt injection' in original_name.lower():
+            return f"Prompt Injection via {trad_comp} to {ai_comp}"
+        elif 'model extraction' in original_name.lower():
+            return f"AI Model Extraction Through {trad_comp} Interface"
+        elif 'data leakage' in original_name.lower():
+            return f"AI Data Leakage Between {ai_comp} and {trad_comp}"
+        else:
+            return f"AI-Traditional Integration Risk ({ai_comp}↔{trad_comp})"
+
+    elif threat_type == 'external_dependency':
+        external_services = threat.get('external_services', [])
+        if external_services:
+            service_name = external_services[0].split('(')[0].strip()
+            if 'service unavailability' in original_name.lower():
+                return f"{service_name} Service Outage Risk"
+            elif 'vendor lock' in original_name.lower():
+                return f"{service_name} Vendor Lock-in Dependency"
+            else:
+                return f"External {service_name} Dependency Risk"
+
+    # For component-specific threats, make them more specific
+    if isinstance(target_component, str) and target_component != 'Unknown':
+        comp_short = target_component.split('(')[0].strip()
+
+        if 'sql injection' in original_name.lower():
+            return f"SQL Injection Attack on {comp_short}"
+        elif 'xss' in original_name.lower() or 'cross-site scripting' in original_name.lower():
+            return f"Cross-Site Scripting in {comp_short}"
+        elif 'prompt injection' in original_name.lower():
+            return f"Prompt Injection Attack Against {comp_short}"
+        elif 'privilege escalation' in original_name.lower():
+            return f"Privilege Escalation via {comp_short}"
+        elif 'model extraction' in original_name.lower():
+            return f"AI Model Extraction from {comp_short}"
+
+    # Fallback: extract key words from description if available
+    if description and len(description) > 20:
+        # Extract first meaningful phrase from description
+        desc_words = description.split()[:8]  # First 8 words
+        if len(desc_words) >= 3:
+            return ' '.join(desc_words).rstrip('.,;:')
+
+    # Last fallback: clean up original name
+    return _clean_threat_name(original_name)
+
+def _clean_threat_name(name: str) -> str:
+    """Clean and standardize threat name"""
+    if not name or name == 'Unknown Threat':
+        return 'Unspecified Security Threat'
+
+    # Capitalize first letter of each word, handle common abbreviations
+    words = name.split()
+    cleaned_words = []
+
+    for word in words:
+        word_lower = word.lower()
+        if word_lower in ['ai', 'llm', 'api', 'ui', 'sql', 'xss', 'csrf', 'aws', 'dos', 'ddos']:
+            cleaned_words.append(word.upper())
+        elif word_lower in ['oauth', 'saml', 'jwt']:
+            cleaned_words.append(word_lower.upper())
+        else:
+            cleaned_words.append(word.capitalize())
+
+    return ' '.join(cleaned_words)
 
 def export_threats_to_csv(result: Dict[str, Any], output_dir: str = "results") -> str:
     """Export threats to CSV file for easy analysis"""

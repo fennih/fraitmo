@@ -39,7 +39,12 @@ class ThreatAnalysisState(TypedDict):
 
     # LLM analysis (parallel path)
     llm_threats: Annotated[List[Dict[str, Any]], operator.add]       # LLM identified threats
-    llm_analysis_summary: Dict[str, Any]    # LLM analysis summary
+    llm_analysis_summary: Dict[str, Any]
+
+    # Cross-Component Analysis Results
+    cross_component_threats: Annotated[List[Dict[str, Any]], operator.add]  # Data flow and trust boundary threats
+    trust_boundary_count: int                                               # Number of trust boundaries
+    data_flow_count: int                                                    # Number of data flows analyzed
 
     # LLM analysis
     threat_analysis: Dict[str, Any]  # LLM analysis results

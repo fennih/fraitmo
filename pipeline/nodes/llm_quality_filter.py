@@ -4,14 +4,98 @@ from typing import Dict, Any, List
 import json
 from rich.console import Console
 from rich.text import Text
+import re
 
 console = Console()
+
+def _generate_unique_threat_id(threat: Dict[str, Any], index: int) -> str:
+    """Generate unique threat ID based on component and threat characteristics"""
+
+    # Extract component name
+    target_comp = threat.get('target_component', {})
+    if isinstance(target_comp, dict):
+        component_name = target_comp.get('name', 'Unknown')
+    elif isinstance(target_comp, str):
+        component_name = target_comp
+    else:
+        component_name = 'Unknown'
+
+    # Clean component name for ID
+    clean_component = re.sub(r'[^a-zA-Z0-9]', '', component_name.replace(' ', ''))[:8].upper()
+
+    # Determine threat type prefix
+    threat_name = threat.get('name', 'Unknown').lower()
+    ai_specific = threat.get('ai_specific', False)
+
+    if ai_specific or any(kw in threat_name for kw in ['prompt', 'model', 'adversarial', 'hallucination', 'bias']):
+        prefix = 'AI'
+    elif any(kw in threat_name for kw in ['sql', 'injection', 'xss', 'csrf']):
+        prefix = 'WEB'
+    elif any(kw in threat_name for kw in ['auth', 'bypass', 'escalation']):
+        prefix = 'AUTH'
+    elif any(kw in threat_name for kw in ['network', 'ddos', 'mitm']):
+        prefix = 'NET'
+    else:
+        prefix = 'GEN'
+
+    # Generate final ID: PREFIX-COMPONENT-###
+    threat_id = f"{prefix}-{clean_component}-{index:03d}"
+
+    return threat_id
+
+def _assign_threat_ids_and_sort(threats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Assign unique IDs to threats and sort by component and severity"""
+
+    # Group threats by component for better organization
+    threats_by_component = {}
+    for threat in threats:
+        target_comp = threat.get('target_component', {})
+        if isinstance(target_comp, dict):
+            component_name = target_comp.get('name', 'Unknown')
+        elif isinstance(target_comp, str):
+            component_name = target_comp
+        else:
+            component_name = 'Unknown'
+
+        if component_name not in threats_by_component:
+            threats_by_component[component_name] = []
+        threats_by_component[component_name].append(threat)
+
+    # Sort components alphabetically and threats by severity within each component
+    severity_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Unknown': 4}
+
+    final_threats = []
+    global_index = 1
+
+    for component_name in sorted(threats_by_component.keys()):
+        component_threats = threats_by_component[component_name]
+
+        # Sort threats within component by severity
+        component_threats.sort(key=lambda t: severity_order.get(t.get('severity', 'Unknown'), 5))
+
+        # Assign IDs and add to final list
+        for threat in component_threats:
+            threat_id = _generate_unique_threat_id(threat, global_index)
+            threat['id'] = threat_id
+            threat['component_order'] = component_name
+            threat['severity_order'] = severity_order.get(threat.get('severity', 'Unknown'), 5)
+            final_threats.append(threat)
+            global_index += 1
+
+    console.print(Text("[INFO]", style="bold blue"), f"Assigned unique IDs to {len(final_threats)} threats across {len(threats_by_component)} components")
+
+    return final_threats
 
 def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     LLM Quality Filter Node
     Uses LLM as judge to deduplicate threats and create specific threat-mitigation mappings
     """
+    # Check if quality filter was already applied
+    if state.get('quality_filter_applied', False):
+        console.print(Text("[INFO]", style="bold blue"), "LLM Quality Filter: Already applied, skipping duplicate execution")
+        return {}  # Return empty dict to avoid duplicating state
+
     console.print(Text("[INFO]", style="bold blue"), "LLM Quality Filter: Starting deduplication and mapping...")
 
     try:
@@ -21,7 +105,8 @@ def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Get all threats from both paths
         rag_threats = state.get('threats_found', [])
         llm_threats = state.get('llm_threats', [])
-        all_threats = rag_threats + llm_threats
+        cross_threats = state.get('cross_component_threats', [])
+        all_threats = rag_threats + llm_threats + cross_threats
 
         # Get all mitigations
         rag_mitigations = state.get('rag_mitigations', [])
@@ -44,25 +129,28 @@ def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Step 1: Deduplicate threats using LLM
         deduplicated_threats = _deduplicate_threats_with_llm(llm_client, all_threats)
 
-        # Step 2: Create threat-mitigation mappings
-        threat_mitigation_mapping = _create_threat_mitigation_mapping(llm_client, deduplicated_threats, all_mitigations)
+        # Step 2: Assign unique IDs and sort by component/severity
+        organized_threats = _assign_threat_ids_and_sort(deduplicated_threats)
 
-        # Step 3: Filter and rank mitigations
+        # Step 3: Create threat-mitigation mappings
+        threat_mitigation_mapping = _create_threat_mitigation_mapping(llm_client, organized_threats, all_mitigations)
+
+        # Step 4: Filter and rank mitigations
         filtered_mitigations = _filter_and_rank_mitigations(llm_client, threat_mitigation_mapping, all_mitigations)
 
-        console.print(Text("[OK]", style="bold green"), f"Quality filter complete: {len(deduplicated_threats)} unique threats, {len(filtered_mitigations)} relevant mitigations")
+        console.print(Text("[OK]", style="bold green"), f"Quality filter complete: {len(organized_threats)} unique threats, {len(filtered_mitigations)} relevant mitigations")
 
         return {
-            'filtered_threats': deduplicated_threats,
+            'filtered_threats': organized_threats,
             'filtered_mitigations': filtered_mitigations,
             'threat_mitigation_mapping': threat_mitigation_mapping,
             'quality_filter_applied': True,
             'original_counts': {
-                'threats': len(all_threats),
+                'threats': len(rag_threats + llm_threats + cross_threats),
                 'mitigations': len(all_mitigations)
             },
             'filtered_counts': {
-                'threats': len(deduplicated_threats),
+                'threats': len(organized_threats),
                 'mitigations': len(filtered_mitigations)
             }
         }
@@ -70,7 +158,7 @@ def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         console.print(Text("[ERROR]", style="bold red"), f"Quality filter failed: {e}")
         # Use fallback filter
-        fallback_threats = state.get('threats_found', []) + state.get('llm_threats', [])
+        fallback_threats = state.get('threats_found', []) + state.get('llm_threats', []) + state.get('cross_component_threats', [])
         fallback_mitigations = state.get('rag_mitigations', []) + state.get('llm_mitigations', [])
         return _apply_simple_fallback_filter(fallback_threats, fallback_mitigations, error=str(e))
 
