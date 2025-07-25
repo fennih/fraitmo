@@ -37,11 +37,13 @@ def cross_component_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         try:
             client = UnifiedLLMClient()
             if not client.available_models:
-                console.print(Text("[WARN]", style="bold yellow"), "No LLM available for cross-component analysis")
-                return _analyze_dataflows_simple(dfd_model, all_components)
+                error_msg = "Cross-component analysis requires LLM - no models available"
+                console.print(Text("[ERROR]", style="bold red"), error_msg)
+                return {"errors": [error_msg]}
         except Exception as e:
-            console.print(Text("[WARN]", style="bold yellow"), f"LLM unavailable, using simple analysis: {e}")
-            return _analyze_dataflows_simple(dfd_model, all_components)
+            error_msg = f"Failed to initialize LLM for cross-component analysis: {e}"
+            console.print(Text("[ERROR]", style="bold red"), error_msg)
+            return {"errors": [error_msg]}
 
         # Analyze data flows between components
         cross_threats = []
