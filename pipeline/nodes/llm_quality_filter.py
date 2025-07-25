@@ -118,8 +118,9 @@ def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Initialize LLM client
         llm_client = UnifiedLLMClient()
         if not llm_client.active_model:
-            console.print(Text("[WARN]", style="bold yellow"), "No LLM available for quality filtering")
-            return _apply_simple_fallback_filter(all_threats, all_mitigations)
+            error_msg = "Quality filtering requires LLM - no models available"
+            console.print(Text("[ERROR]", style="bold red"), error_msg)
+            return {"errors": [error_msg]}
 
         # If we have too many threats, apply pre-filtering
         if len(all_threats) > 50:
@@ -156,11 +157,9 @@ def llm_quality_filter_node(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"Quality filter failed: {e}")
-        # Use fallback filter
-        fallback_threats = state.get('threats_found', []) + state.get('llm_threats', []) + state.get('cross_component_threats', [])
-        fallback_mitigations = state.get('rag_mitigations', []) + state.get('llm_mitigations', [])
-        return _apply_simple_fallback_filter(fallback_threats, fallback_mitigations, error=str(e))
+        error_msg = f"Quality filter failed: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        return {"errors": [error_msg]}
 
 def _deduplicate_threats_with_llm(llm_client, threats: List[Dict]) -> List[Dict]:
     """Use LLM to identify and remove duplicate threats"""

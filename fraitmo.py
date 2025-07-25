@@ -464,12 +464,21 @@ def _detect_llm_providers(console):
 
         # Check if any models are available
         if not test_client.available_models:
-            console.print(Text("[OK]", style="bold green"), "Running in offline mode - parsing and classification only")
+            console.print(Text("[ERROR]", style="bold red"), "No LLM models detected!")
+            console.print(Text("[ERROR]", style="bold red"), "FRAITMO requires an active LLM model to function.")
+            console.print(Text("[INFO]", style="bold blue"), "Please start one of the following:")
+            console.print(Text("[INFO]", style="bold blue"), "  • Ollama: ollama serve")
+            console.print(Text("[INFO]", style="bold blue"), "  • LM Studio: Start LM Studio and load a model")
+            sys.exit(1)
         else:
-            console.print(Text("[OK]", style="bold green"), "LLM models detected")
+            console.print(Text("[OK]", style="bold green"), f"LLM models detected: {len(test_client.available_models)} available")
+            console.print(Text("[INFO]", style="bold blue"), f"Active model: {test_client.active_model} ({test_client.active_provider})")
 
     except Exception as e:
-        console.print(Text("[WARN]", style="bold yellow"), "LLM detection failed but continuing in offline mode")
+        console.print(Text("[ERROR]", style="bold red"), f"LLM detection failed: {e}")
+        console.print(Text("[ERROR]", style="bold red"), "FRAITMO requires an active LLM model to function.")
+        console.print(Text("[INFO]", style="bold blue"), "Please start Ollama or LM Studio and try again.")
+        sys.exit(1)
 
 
 def _load_config_file(config_path, console):
