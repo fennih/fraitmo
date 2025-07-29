@@ -1,17 +1,18 @@
 # Knowledge Base Router Node - Routes to appropriate knowledge base (AI vs General)
 
 from typing import Dict, Any
-from rich.console import Console
+from utils.console import console
 from rich.text import Text
 
-console = Console()
-
-def kb_router_node(state: Dict[str, Any]) -> Dict[str, Any]:
+def kb_router_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
     """
     Knowledge Base Router Node
     Routes to appropriate knowledge bases based on component types
     """
     console.print(Text("[INFO]", style="bold blue"), "Knowledge Base Router Node: Loading appropriate knowledge bases...")
+
+    if progress_callback:
+        progress_callback(12, "📚 Loading knowledge bases...")
 
     try:
         # Import here to avoid circular dependencies
@@ -72,8 +73,13 @@ def kb_router_node(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        error_msg = f"Knowledge Base Router Error: {e}"
+        error_msg = f"Knowledge Base Routing Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        return {"errors": [error_msg]}
+        return {
+            "ai_knowledge_base": [],
+            "general_knowledge_base": [],
+            "routing_strategy": [],
+            "errors": [error_msg]
+        }
 
 

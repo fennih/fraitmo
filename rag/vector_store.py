@@ -12,10 +12,10 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from rich.console import Console
+from utils.console import console
 from rich.text import Text
 
-console = Console()
+
 
 class ThreatVectorStore:
     """
