@@ -1,17 +1,72 @@
 # RAG Threat Searcher Node - Searches for relevant threats in loaded knowledge bases using RAG
 
 from typing import Dict, Any, List
-from rich.console import Console
+import json
+import re
+from utils.console import console
 from rich.text import Text
 
-console = Console()
+# Import severity inference function
+def _infer_severity_from_threat_name(threat_name: str) -> str:
+    """
+    Infer severity level based on threat name when not explicitly provided
+    """
+    threat_name_lower = threat_name.lower()
 
-def rag_threat_searcher_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    # Critical severity threats
+    critical_keywords = [
+        'injection', 'bypass', 'escalation', 'extraction', 'code execution',
+        'remote code', 'privilege escalation', 'authentication bypass'
+    ]
+
+    # High severity threats
+    high_keywords = [
+        'adversarial', 'poisoning', 'manipulation', 'hijacking', 'tampering',
+        'unauthorized access', 'data breach', 'xss', 'csrf', 'sql injection'
+    ]
+
+    # Medium severity threats
+    medium_keywords = [
+        'disclosure', 'leak', 'exposure', 'bias', 'hallucination',
+        'denial of service', 'dos', 'brute force'
+    ]
+
+    # Low severity threats
+    low_keywords = [
+        'information disclosure', 'minor leak', 'configuration weakness',
+        'logging issue', 'weak cipher', 'version disclosure', 'banner disclosure',
+        'path disclosure', 'enumeration', 'fingerprinting', 'cache poisoning'
+    ]
+
+    # Check for critical threats
+    if any(keyword in threat_name_lower for keyword in critical_keywords):
+        return 'Critical'
+
+    # Check for high severity threats
+    if any(keyword in threat_name_lower for keyword in high_keywords):
+        return 'High'
+
+    # Check for medium severity threats
+    if any(keyword in threat_name_lower for keyword in medium_keywords):
+        return 'Medium'
+
+    # Check for low severity threats
+    if any(keyword in threat_name_lower for keyword in low_keywords):
+        return 'Low'
+
+    # Default to Low for truly unknown threats (most conservative approach)
+    return 'Low'
+
+
+def rag_threat_searcher_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
     """
     RAG Threat Search Node
     Performs full RAG (Retrieval + Generation): searches knowledge base and generates contextual threat analysis
     """
     console.print(Text("[INFO]", style="bold blue"), "RAG Threat Search Node: Performing full RAG analysis...")
+
+    if progress_callback:
+        progress_callback(14, "🔎 Starting RAG threat search...")
 
     try:
         # Import here to avoid circular dependencies
@@ -23,7 +78,12 @@ def rag_threat_searcher_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if not llm_client.active_model:
             error_msg = "RAG analysis requires LLM for generation - no models available"
             console.print(Text("[ERROR]", style="bold red"), error_msg)
-            return {"errors": [error_msg]}
+            return {
+                "threats_found": [],
+                "ai_threats": [],
+                "traditional_threats": [],
+                "errors": [error_msg]
+            }
 
         ai_components = state.get('ai_components', [])
         traditional_components = state.get('traditional_components', [])
@@ -79,7 +139,12 @@ def rag_threat_searcher_node(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         error_msg = f"RAG Threat Search Error: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        return {"errors": [error_msg]}
+        return {
+            "threats_found": [],
+            "ai_threats": [],
+            "traditional_threats": [],
+            "errors": [error_msg]
+        }
 
 
 def search_threats_for_component(component: Dict[str, Any], knowledge_base: List[Dict], threat_type: str) -> List[Dict[str, Any]]:
@@ -244,8 +309,8 @@ def _generate_contextual_threats(llm_client, component: Dict[str, Any], relevant
             connected_components = []
             if hasattr(dfd_model, 'connections'):
                 for conn in dfd_model.connections:
-                    if (conn.get('source') == comp_name or conn.get('target') == comp_name):
-                        other_comp = conn.get('target') if conn.get('source') == comp_name else conn.get('source')
+                    if (conn.source_name == comp_name or conn.target_name == comp_name):
+                        other_comp = conn.target_name if conn.source_name == comp_name else conn.source_name
                         connected_components.append(other_comp)
 
             if connected_components:
@@ -264,12 +329,13 @@ RELEVANT THREAT KNOWLEDGE:
 {doc_context}
 
 TASK:
-Based on the provided threat knowledge and component details, generate 2-3 specific, actionable security threats that could affect this component. Each threat should:
+Based on the provided threat knowledge and component details, generate all relevant specific, actionable security threats that could affect this component. Each threat should:
 
 1. Be directly relevant to the component type and context
 2. Reference appropriate attack vectors from the knowledge base
 3. Include realistic impact assessment
 4. Be specific to this component (not generic)
+5. Include probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific component? Consider: component type, configuration, connections, knowledge base evidence.
 
 OUTPUT FORMAT (JSON):
 ```json
@@ -281,6 +347,7 @@ OUTPUT FORMAT (JSON):
     "attack_vector": "How the attack could be executed",
     "impact": "Potential business/technical impact",
     "likelihood": "High|Medium|Low",
+    "probability_score": 85,
     "target_component": "{comp_name}",
     "source_path": "rag_{component_type}",
     "generated_by": "rag_analysis"
@@ -291,51 +358,205 @@ OUTPUT FORMAT (JSON):
 Generate the threats now:"""
 
         # Call LLM for generation
-        response = llm_client.generate_response(prompt)
+        response = llm_client.generate_response(prompt, context=f"RAG analysis: {comp_name} ({component_type})")
 
-        if response and response.strip():
-            # Try to extract JSON from response
-            import json
-            import re
-
-            # Look for JSON in the response
-            json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # Try to find JSON without markdown
-                json_match = re.search(r'\[.*\]', response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    console.print(Text("[WARN]", style="bold yellow"), f"Could not extract JSON from LLM response for {comp_name}")
-                    return []
-
-            try:
-                threats = json.loads(json_str)
-                if isinstance(threats, list):
-                    # Validate and clean up threats
-                    validated_threats = []
-                    for threat in threats:
-                        if isinstance(threat, dict) and threat.get('name') and threat.get('description'):
-                            # Ensure required fields
-                            threat['target_component'] = component
-                            threat['source_path'] = f'rag_{component_type}'
-                            threat['generated_by'] = 'rag_analysis'
-                            validated_threats.append(threat)
-
-                    console.print(Text("[OK]", style="bold green"), f"Generated {len(validated_threats)} contextual threats for {comp_name}")
-                    return validated_threats
-                else:
-                    console.print(Text("[WARN]", style="bold yellow"), f"LLM response was not a list for {comp_name}")
-                    return []
-
-            except json.JSONDecodeError as e:
-                console.print(Text("[WARN]", style="bold yellow"), f"Could not parse JSON from LLM response for {comp_name}: {e}")
-                return []
-        else:
-            console.print(Text("[WARN]", style="bold yellow"), f"Empty LLM response for {comp_name}")
+        if not response or response.strip() == "":
+            console.print(Text("[WARN]", style="bold yellow"), f"Empty response for {comp_name}")
             return []
+
+        threats = []
+
+        # First try: direct JSON parsing
+        response_clean = response.strip()
+        if response_clean.startswith('```json'):
+            response_clean = response_clean[7:]  # Remove ```json prefix
+        if response_clean.endswith('```'):
+            response_clean = response_clean[:-3]
+        response_clean = response_clean.strip()
+
+        try:
+            # Try to extract JSON array - IMPROVED PARSING
+            threats_data = []
+
+            # Method 1: Direct array parsing
+            if response_clean.startswith('[') and response_clean.endswith(']'):
+                try:
+                    threats_data = json.loads(response_clean)
+                    console.print(Text("[DEBUG]", style="dim green"), f"✅ Direct array parsing successful for {comp_name}")
+                except json.JSONDecodeError:
+                    console.print(Text("[DEBUG]", style="dim yellow"), f"⚠️ Direct array parsing failed for {comp_name}")
+
+            # Method 2: Find JSON array with improved regex
+            if not threats_data:
+                import re
+                # Try multiple patterns to find JSON arrays
+                patterns = [
+                    r'\[\s*\{.*?\}\s*\]',  # Array with objects
+                    r'\[.*?\]',            # General array
+                    r'```json\s*(\[.*?\])\s*```',  # Markdown wrapped
+                    r'```\s*(\[.*?\])\s*```',      # Code block wrapped
+                ]
+
+                for pattern in patterns:
+                    json_match = re.search(pattern, response_clean, re.DOTALL | re.MULTILINE)
+                    if json_match:
+                        try:
+                            json_str = json_match.group(1) if len(json_match.groups()) > 0 else json_match.group(0)
+                            threats_data = json.loads(json_str)
+                            console.print(Text("[DEBUG]", style="dim green"), f"✅ Pattern {pattern[:20]}... successful for {comp_name}")
+                            break
+                        except json.JSONDecodeError:
+                            continue
+
+            # Method 3: Try to find single objects and create array
+            if not threats_data:
+                # Look for individual threat objects
+                object_pattern = r'\{[^{}]*"name"[^{}]*"description"[^{}]*\}'
+                matches = re.findall(object_pattern, response_clean, re.DOTALL)
+
+                for match in matches:
+                    try:
+                        # Clean up the JSON object
+                        clean_match = re.sub(r',\s*}', '}', match)  # Remove trailing commas
+                        threat_obj = json.loads(clean_match)
+                        if threat_obj.get('name'):
+                            threats_data.append(threat_obj)
+                    except json.JSONDecodeError:
+                        continue
+
+                if threats_data:
+                    console.print(Text("[DEBUG]", style="dim green"), f"✅ Individual object parsing found {len(threats_data)} threats for {comp_name}")
+
+            # Method 4: Try to parse as single object (not array)
+            if not threats_data:
+                try:
+                    # Maybe it's a single object, not an array
+                    single_obj = json.loads(response_clean)
+                    if isinstance(single_obj, dict) and single_obj.get('name'):
+                        threats_data = [single_obj]
+                        console.print(Text("[DEBUG]", style="dim green"), f"✅ Single object parsing successful for {comp_name}")
+                except json.JSONDecodeError:
+                    pass
+
+            # If we still have no data, raise the error for fallback handling
+            if not threats_data:
+                console.print(Text("[DEBUG]", style="dim red"), f"❌ All parsing methods failed for {comp_name}. Response preview: {response_clean[:200]}...")
+                raise ValueError("No JSON array found")
+
+            # Process each threat
+            for threat_data in threats_data:
+                if isinstance(threat_data, dict) and threat_data.get('name'):
+                    # Ensure required fields
+                    threat_data['target_component'] = component
+                    threat_data['source_path'] = f'rag_{component_type}'
+                    threat_data['generated_by'] = 'rag_analysis'
+
+                    # Assign severity if missing
+                    if not threat_data.get('severity') or threat_data.get('severity', '').lower() in ['unknown', '']:
+                        threat_data['severity'] = _infer_severity_from_threat_name(threat_data['name'])
+
+                    # Ensure probability_score exists
+                    if 'probability_score' not in threat_data:
+                        threat_data['probability_score'] = 70  # Default for RAG-generated threats
+
+                    threats.append(threat_data)
+
+            console.print(Text("[OK]", style="bold green"), f"Generated {len(threats)} contextual threats for {comp_name}")
+
+        except json.JSONDecodeError as e:
+            console.print(Text("[WARN]", style="bold yellow"), f"Full JSON parse failed for {comp_name}, attempting enhanced recovery...")
+
+            # ENHANCED Recovery: Multiple fallback strategies
+            threats = []
+
+            # Strategy 1: Extract threats by name/description patterns
+            threat_patterns = [
+                # Pattern 1: Standard format with quotes
+                r'"name"\s*:\s*"([^"]+)"[^}]*?"description"\s*:\s*"([^"]+)"',
+                # Pattern 2: Relaxed format
+                r'name["\s]*:\s*["\s]*([^",\n]+)[^}]*?description["\s]*:\s*["\s]*([^",\n]+)',
+                # Pattern 3: Find lines that look like threats
+                r'(\w+(?:\s+\w+)*(?:\s+(?:Attack|Vulnerability|Injection|Bypass|Escalation)))[:\-\s]*([^.\n]+)',
+            ]
+
+            for i, pattern in enumerate(threat_patterns, 1):
+                matches = re.finditer(pattern, response, re.DOTALL | re.IGNORECASE)
+                pattern_threats = []
+
+                for match in matches:
+                    try:
+                        threat_name = match.group(1).strip().strip('"').strip("'")
+                        threat_desc = match.group(2).strip().strip('"').strip("'")
+
+                        # Clean up and validate
+                        if len(threat_name) > 5 and len(threat_desc) > 10:
+                            threat_obj = {
+                                'name': threat_name,
+                                'description': threat_desc,
+                                'severity': _infer_severity_from_threat_name(threat_name),
+                                'target_component': component,
+                                'source_path': f'rag_{component_type}',
+                                'generated_by': 'rag_analysis',
+                                'probability_score': 70,
+                                'likelihood': 'Medium',
+                                'recovered': True,
+                                'recovery_pattern': i
+                            }
+                            pattern_threats.append(threat_obj)
+
+                    except (AttributeError, IndexError):
+                        continue
+
+                if pattern_threats:
+                    threats.extend(pattern_threats)
+                    console.print(Text("[DEBUG]", style="dim green"), f"✅ Recovery pattern {i} found {len(pattern_threats)} threats for {comp_name}")
+
+            # Strategy 2: Generic threat extraction from content
+            if not threats:
+                # Look for security-related terms and create generic threats
+                security_keywords = [
+                    'injection', 'bypass', 'escalation', 'vulnerability', 'attack',
+                    'unauthorized', 'exploit', 'breach', 'hijacking', 'tampering'
+                ]
+
+                found_keywords = []
+                for keyword in security_keywords:
+                    if keyword.lower() in response.lower():
+                        found_keywords.append(keyword)
+
+                if found_keywords:
+                    for keyword in found_keywords[:3]:  # Max 3 generic threats
+                        threat_obj = {
+                            'name': f"{keyword.title()} Vulnerability in {comp_name}",
+                            'description': f"Potential {keyword} vulnerability identified in {comp_name} component based on threat analysis.",
+                            'severity': _infer_severity_from_threat_name(keyword),
+                            'target_component': component,
+                            'source_path': f'rag_{component_type}',
+                            'generated_by': 'rag_analysis',
+                            'probability_score': 60,
+                            'likelihood': 'Medium',
+                            'recovered': True,
+                            'recovery_pattern': 'generic'
+                        }
+                        threats.append(threat_obj)
+
+                    console.print(Text("[DEBUG]", style="dim blue"), f"🔧 Generic recovery created {len(threats)} threats for {comp_name}")
+
+            if threats:
+                console.print(Text("[OK]", style="bold green"), f"Recovered {len(threats)} threats from malformed response for {comp_name}")
+                console.print(Text("[RECOVERY]", style="bold cyan"), f"Enhanced recovery successful for {comp_name}")
+            else:
+                console.print(Text("[WARN]", style="bold yellow"), f"Could not extract any threats from LLM response for {comp_name}")
+                console.print(Text("[DEBUG]", style="dim red"), f"Response sample: {response[:300]}...")
+
+        # Final validation and cleanup
+        validated_threats = []
+        for threat in threats:
+            if threat.get('name') and threat.get('description'):
+                validated_threats.append(threat)
+
+        console.print(Text("[OK]", style="bold green"), f"Generated {len(validated_threats)} contextual threats for {comp_name}")
+        return validated_threats
 
     except Exception as e:
         console.print(Text("[ERROR]", style="bold red"), f"Error generating contextual threats for {comp_name}: {e}")

@@ -6,10 +6,10 @@ Analyzes DFD components directly with LLM without requiring knowledge base
 import json
 import re
 from typing import Dict, Any, List
-from rich.console import Console
+from utils.console import console
 from rich.text import Text
 
-console = Console()
+
 
 def _infer_severity_from_threat_name(threat_name: str) -> str:
     """
@@ -35,6 +35,13 @@ def _infer_severity_from_threat_name(threat_name: str) -> str:
         'denial of service', 'dos', 'brute force'
     ]
 
+    # Low severity threats
+    low_keywords = [
+        'information disclosure', 'minor leak', 'configuration weakness',
+        'logging issue', 'weak cipher', 'version disclosure', 'banner disclosure',
+        'path disclosure', 'enumeration', 'fingerprinting', 'cache poisoning'
+    ]
+
     # Check for critical threats
     if any(keyword in threat_name_lower for keyword in critical_keywords):
         return 'Critical'
@@ -47,8 +54,12 @@ def _infer_severity_from_threat_name(threat_name: str) -> str:
     if any(keyword in threat_name_lower for keyword in medium_keywords):
         return 'Medium'
 
-    # Default to Medium for unknown threats
-    return 'Medium'
+    # Check for low severity threats
+    if any(keyword in threat_name_lower for keyword in low_keywords):
+        return 'Low'
+
+    # Default to Low for truly unknown threats (most conservative approach)
+    return 'Low'
 
 def _clean_llm_json_response(response: str, component_name: str = "component") -> str:
     """Clean LLM response to extract valid JSON, removing markdown and extra text"""
@@ -171,7 +182,7 @@ def _parse_partial_json_threats(response: str, component_name: str) -> Dict[str,
                 'recovery_method': 'failed'
             }
 
-def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
+def llm_analyzer_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
     """Direct LLM Analysis Node - Analyzes threats using pure LLM reasoning"""
     console.print(Text("[INFO]", style="bold blue"), "LLM Analysis Node: Analyzing threats with pure LLM reasoning...")
 
@@ -180,7 +191,11 @@ def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         dfd_model = state.get('dfd_model')
         if not dfd_model:
             console.print(Text("[WARN]", style="bold yellow"), "No DFD model available for direct analysis")
-            return {"warnings": ["No DFD model available for direct analysis"]}
+            return {
+                "llm_threats": [],
+                "llm_mitigations": [],
+                "warnings": ["No DFD model available for direct analysis"]
+            }
 
         # Initialize LLM client
         from rag.llm_client import UnifiedLLMClient
@@ -189,10 +204,18 @@ def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             client = UnifiedLLMClient()
             if not client.available_models:
                 console.print(Text("[ERROR]", style="bold red"), "Failed to initialize LLM client: no models available")
-                return {"errors": ["LLM client initialization failed - no models available"]}
+                return {
+                    "llm_threats": [],
+                    "llm_mitigations": [],
+                    "errors": ["LLM client initialization failed - no models available"]
+                }
         except Exception as e:
             console.print(Text("[ERROR]", style="bold red"), f"Failed to initialize LLM client: {e}")
-            return {"errors": [f"LLM client initialization failed: {e}"]}
+            return {
+                "llm_threats": [],
+                "llm_mitigations": [],
+                "errors": [f"LLM client initialization failed: {e}"]
+            }
 
         # Perform comprehensive threat analysis
         ai_components = state.get('ai_components', [])
@@ -206,20 +229,43 @@ def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Get the skip_mitigation flag from state
         skip_mitigation = state.get('skip_mitigation', False)
 
-        # Analyze AI/LLM components (if any)
+        # Calculate REAL progress based on component count
+        total_components = len(ai_components) + len(traditional_components)
+
+        # REALISTIC progress allocation - LLM analysis is 60-90% of total time!
+        base_progress = 15  # Start LLM analysis at 15% (after fast setup)
+        max_progress = 90   # End at 90% (leaving 10% for final steps)
+
+        # Report start of LLM analysis with REAL component count
+        if progress_callback:
+            progress_callback(base_progress, f"🤖 Analyzing {total_components} components with LLM...")
+
+        # Analyze AI/LLM components (if any) with REAL progress per component
         if ai_components:
-            ai_analysis = _analyze_ai_components(client, ai_components, dfd_model, skip_mitigation)
+            ai_analysis = _analyze_ai_components(
+                client, ai_components, dfd_model, skip_mitigation,
+                progress_callback, base_progress, max_progress, 0, total_components
+            )
             direct_threats.extend(ai_analysis.get('threats', []))
             if not skip_mitigation:
                 direct_mitigations.extend(ai_analysis.get('mitigations', []))
             direct_analysis_summary.update(ai_analysis.get('summary', {}))
 
-        # Analyze traditional components
+        # Analyze traditional components with REAL progress per component
         if traditional_components:
-            traditional_analysis = _analyze_traditional_components(client, traditional_components, dfd_model, skip_mitigation)
+            ai_component_count = len(ai_components)
+            traditional_analysis = _analyze_traditional_components(
+                client, traditional_components, dfd_model, skip_mitigation,
+                progress_callback, base_progress, max_progress, ai_component_count, total_components
+            )
             direct_threats.extend(traditional_analysis.get('threats', []))
             if not skip_mitigation:
                 direct_mitigations.extend(traditional_analysis.get('mitigations', []))
+            direct_analysis_summary.update(traditional_analysis.get('summary', {}))
+
+        # Report completion with REAL threat count
+        if progress_callback:
+            progress_callback(max_progress, f"🤖 LLM analysis complete: {len(direct_threats)} threats found")
 
         if skip_mitigation:
             console.print(Text("[OK]", style="bold green"), f"LLM analysis complete: {len(direct_threats)} threats (mitigations skipped)")
@@ -243,117 +289,77 @@ def llm_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         error_msg = f"LLM analysis failed: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        return {"errors": [error_msg]}
+        return {
+            "llm_threats": [],
+            "llm_mitigations": [],
+            "errors": [error_msg]
+        }
 
 
 def _validate_threat_component_logic(threat: Dict[str, Any], component: Dict[str, Any]) -> bool:
-    """Validate that a threat is logically appropriate for a specific component type"""
+    """Enhanced validation that considers component context and cross-component threats"""
 
     threat_name = threat.get('name', '').lower()
     component_type = component.get('type', '').lower()
     component_name = component.get('name', '').lower()
 
-    # Database components (Aurora, etc.)
-    if any(db_type in component_type for db_type in ['database', 'aurora', 'rds', 'mongodb', 'mysql']):
-        # Valid database threats
-        valid_threats = ['sql injection', 'privilege escalation', 'data breach', 'backup', 'encryption']
-        # Invalid database threats
-        invalid_threats = ['xss', 'cross-site scripting', 'csrf', 'clickjacking']
+    # Check if component is AI-related (more comprehensive check)
+    is_ai_component = (
+        component.get('ai_type') is not None or
+        component.get('is_ai_component', False) or
+        any(ai_word in component_name for ai_word in ['langgraph', 'openai', 'claude', 'gpt', 'llm', 'ai']) or
+        any(ai_type in component_type for ai_type in ['llm', 'ai', 'model', 'openai', 'claude'])
+    )
 
-        if any(invalid in threat_name for invalid in invalid_threats):
-            return False
-        return any(valid in threat_name for valid in valid_threats)
+    # Only filter out clearly nonsensical combinations
+    clearly_invalid = False
 
-    # Load Balancer components
-    elif any(lb_type in component_type for lb_type in ['load-balancer', 'alb', 'elb', 'nginx']):
-        # Valid load balancer threats
-        valid_threats = ['ddos', 'ssl/tls', 'certificate', 'routing', 'network', 'bypass']
-        # Invalid load balancer threats
-        invalid_threats = ['sql injection', 'xss', 'database']
+    # Block only extremely obvious mismatches
+    if 'xss' in threat_name and any(db_type in component_type for db_type in ['database', 'aurora', 'rds']):
+        clearly_invalid = True  # XSS on pure database makes no sense
+    elif 'sql injection' in threat_name and any(ui_type in component_type for ui_type in ['mobile', 'ui']) and 'api' not in component_name:
+        clearly_invalid = True  # SQL injection on pure UI (not API) makes no sense
 
-        if any(invalid in threat_name for invalid in invalid_threats):
-            return False
-        return any(valid in threat_name for valid in valid_threats)
+    # Allow AI threats for AI components regardless of type classification
+    if is_ai_component and any(ai_threat in threat_name for ai_threat in ['prompt injection', 'model extraction', 'adversarial', 'hallucination', 'poisoning']):
+        return True
 
-    # Infrastructure/Container components (ECS, Docker, etc.)
-    elif any(infra_type in component_type for infra_type in ['ecs', 'container', 'docker', 'kubernetes']):
-        # Valid infrastructure threats
-        valid_threats = ['privilege escalation', 'container escape', 'image', 'network', 'configuration']
-        # These are infrastructure, NOT AI components!
-        return any(valid in threat_name for valid in valid_threats)
+    # Allow infrastructure threats for container/orchestration components
+    if any(infra_type in component_type for infra_type in ['ecs', 'container', 'docker', 'kubernetes']):
+        return True  # Infrastructure can have various threat types
 
-    # Web/UI components
-    elif any(web_type in component_type for web_type in ['ui', 'web', 'mobile', 'frontend']):
-        # Valid web threats
-        valid_threats = ['xss', 'csrf', 'injection', 'authentication', 'session']
-        return any(valid in threat_name for valid in valid_threats)
+    # Allow cross-component threats (e.g., API accessing database)
+    if any(api_type in component_type for api_type in ['api', 'endpoint', 'rest']) and 'injection' in threat_name:
+        return True  # APIs can have injection threats affecting backends
 
-    # API components
-    elif any(api_type in component_type for api_type in ['api', 'endpoint', 'rest', 'graphql']):
-        # Valid API threats
-        valid_threats = ['injection', 'authentication', 'authorization', 'rate limiting', 'input validation']
-        return any(valid in threat_name for valid in valid_threats)
-
-    # AI/LLM components (actual AI, not infrastructure)
-    elif any(ai_type in component_type for ai_type in ['llm', 'ai', 'model', 'openai', 'claude']) or component.get('ai_specific', False):
-        # Valid AI threats
-        valid_threats = ['prompt injection', 'model extraction', 'adversarial', 'bias', 'hallucination', 'poisoning']
-        return any(valid in threat_name for valid in valid_threats)
-
-    # Default: allow most threats but log for review
-    return True
+    # Default: be permissive unless clearly invalid
+    return not clearly_invalid
 
 def _fix_component_classification(component: Dict[str, Any]) -> Dict[str, Any]:
-    """Fix misclassified components (e.g., AWS ECS marked as AI)"""
+    """Preserve original component classification - analyze all components regardless of type"""
 
-    component_name = component.get('name', '').lower()
-    component_type = component.get('type', '').lower()
-
-    # Fix AWS ECS misclassification
-    if 'ecs' in component_name or 'elastic container' in component_name:
-        component['ai_type'] = None  # Remove AI classification
-        component['component_category'] = 'Infrastructure'
-        component['is_ai_component'] = False
-        return component
-
-    # Fix Load Balancer misclassification
-    if 'load balancer' in component_name or 'alb' in component_type:
-        component['ai_type'] = None
-        component['component_category'] = 'Network'
-        component['is_ai_component'] = False
-        return component
-
-    # Fix Database misclassification
-    if any(db_word in component_name for db_word in ['aurora', 'database', 'rds', 'mysql']):
-        component['ai_type'] = None
-        component['component_category'] = 'Database'
-        component['is_ai_component'] = False
-        return component
-
-    # Correctly identify actual AI components
-    if any(ai_word in component_name for ai_word in ['openai', 'claude', 'gpt', 'llm', 'model']) and not any(infra_word in component_name for infra_word in ['ecs', 'container', 'service']):
-        component['is_ai_component'] = True
-        component['component_category'] = 'AI/ML'
-        return component
+    # No classification changes - preserve original classification from AI detector
+    # All components should be analyzed for threats regardless of their type
+    # This ensures comprehensive threat coverage across the entire DFD
 
     return component
 
-def _analyze_ai_components(client, ai_components: List[Dict], dfd_model, skip_mitigation: bool = False) -> Dict[str, Any]:
+def _analyze_ai_components(client, ai_components: List[Dict], dfd_model, skip_mitigation: bool = False,
+                          progress_callback=None, base_progress=40, max_progress=75,
+                          processed_count=0, total_count=1) -> Dict[str, Any]:
     """Analyze AI/LLM components for specific threats"""
     console.print(Text("[INFO]", style="bold blue"), "Analyzing AI/LLM components...")
 
     threats = []
     mitigations = []
 
-    for component in ai_components:
+    for i, component in enumerate(ai_components):
         try:
             # Fix component classification first
             corrected_component = _fix_component_classification(component.copy())
 
-            # Skip if this was misclassified as AI
-            if not corrected_component.get('is_ai_component', True):
-                console.print(Text("[WARN]", style="bold yellow"), f"Skipping {corrected_component.get('name')} - reclassified as {corrected_component.get('component_category', 'Infrastructure')}")
-                continue
+            # Note: All components should be analyzed - no skipping based on classification
+            # The component will be analyzed regardless of its corrected classification
 
             component_name = corrected_component.get('name', 'Unknown AI Component')
             ai_type = corrected_component.get('ai_type', 'General AI/ML')
@@ -370,7 +376,9 @@ Risks: {', '.join(limited_risk_factors) if limited_risk_factors else 'Standard A
 
 Generate specific, descriptive AI threat names (NOT generic categories):
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "ai_specific": true}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "ai_specific": true, "probability_score": 85}}]}}
+
+probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific system? Consider: component configuration, deployment context, connections, trust zones.
 
 EXAMPLES of good names:
 - "Malicious Prompt Injection to Bypass Content Filters"
@@ -378,7 +386,7 @@ EXAMPLES of good names:
 - "Training Data Poisoning Through Adversarial Inputs"
 - "AI Hallucination Manipulation for Misinformation"
 
-Focus on specific AI vulnerabilities: prompt injection attacks, model extraction techniques, adversarial input manipulation, bias exploitation, hallucination triggers. Max 5 threats."""
+Focus on specific AI vulnerabilities: prompt injection attacks, model extraction techniques, adversarial input manipulation, bias exploitation, hallucination triggers."""
             else:
                 prompt = f"""AI Security Analysis - Component: {component_name}
 Type: {ai_type}
@@ -386,12 +394,14 @@ Risks: {', '.join(limited_risk_factors) if limited_risk_factors else 'Standard A
 
 Generate specific threats and mitigations:
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "ai_specific": true}}], "mitigations": [{{"name": "specific_mitigation_name", "type": "preventive/detective/corrective", "implementation": "implementation_steps", "effectiveness": "High/Medium/Low"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "ai_specific": true, "probability_score": 85}}], "mitigations": [{{"name": "specific_mitigation_name", "type": "preventive/detective/corrective", "implementation": "implementation_steps", "effectiveness": "High/Medium/Low"}}]}}
 
-Focus on: prompt injection, model extraction, adversarial attacks, bias. Max 4 threats, 3 mitigations."""
+probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific system? Consider: component configuration, deployment context, connections, trust zones.
+
+Focus on: prompt injection, model extraction, adversarial attacks, bias."""
 
             # Reduce max_tokens to prevent overflow
-            response = client.generate_response(prompt, max_tokens=800, temperature=0.1)
+            response = client.generate_response(prompt, max_tokens=800, temperature=0.1, context=f"AI component analysis: {component_name}")
 
             # Use advanced parsing with recovery
             recovery_result = _parse_partial_json_threats(response, component_name)
@@ -422,8 +432,20 @@ Focus on: prompt injection, model extraction, adversarial attacks, bias. Max 4 t
             if recovery_method == 'partial_recovery':
                 console.print(Text("[RECOVERY]", style="bold cyan"), f"Partial data recovered for {component_name} using fallback parsing")
 
+            # Report REAL progress per component processed
+            if progress_callback:
+                current_component = processed_count + i + 1
+                progress_percent = base_progress + int((current_component / total_count) * (max_progress - base_progress))
+                progress_callback(progress_percent, f"🤖 Analyzed {current_component}/{total_count} components ({component_name})")
+
         except Exception as e:
             console.print(Text("[WARN]", style="bold yellow"), f"Failed to analyze AI component {component_name}: {e}")
+
+            # Report progress even for failed components
+            if progress_callback:
+                current_component = processed_count + i + 1
+                progress_percent = base_progress + int((current_component / total_count) * (max_progress - base_progress))
+                progress_callback(progress_percent, f"🤖 Processed {current_component}/{total_count} components (error in {component_name})")
 
     return {
         'threats': threats,
@@ -435,14 +457,16 @@ Focus on: prompt injection, model extraction, adversarial attacks, bias. Max 4 t
     }
 
 
-def _analyze_traditional_components(client, traditional_components: List[Dict], dfd_model, skip_mitigation: bool = False) -> Dict[str, Any]:
+def _analyze_traditional_components(client, traditional_components: List[Dict], dfd_model, skip_mitigation: bool = False,
+                                   progress_callback=None, base_progress=40, max_progress=75,
+                                   processed_count=0, total_count=1) -> Dict[str, Any]:
     """Analyze traditional components for standard security threats"""
     console.print(Text("[INFO]", style="bold blue"), "Analyzing traditional components...")
 
     threats = []
     mitigations = []
 
-    for component in traditional_components:
+    for i, component in enumerate(traditional_components):
         try:
             # Fix component classification first
             corrected_component = _fix_component_classification(component.copy())
@@ -460,7 +484,9 @@ def _analyze_traditional_components(client, traditional_components: List[Dict], 
 
 Generate specific, descriptive threat names (NOT generic categories):
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "probability_score": 85}}]}}
+
+probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific component? Consider: component type, configuration, connections, deployment context.
 
 EXAMPLES of good names based on component type:
 - Database: "SQL Injection via Unvalidated User Queries", "Database Privilege Escalation Through Stored Procedures"
@@ -468,19 +494,21 @@ EXAMPLES of good names based on component type:
 - Load Balancer: "SSL/TLS Downgrade Attack on Load Balancer", "DDoS Amplification via Load Balancer"
 - UI: "Cross-Site Scripting in User Input Forms", "Session Hijacking via Insecure Cookies"
 
-Focus on threats appropriate for this specific component type. Max 4 threats."""
+Focus on threats appropriate for this specific component type."""
             else:
                 prompt = f"""Security Analysis - Component: {component_name}
 {component_context}
 
 Generate specific threats and mitigations:
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact"}}], "mitigations": [{{"name": "specific_mitigation_name", "type": "preventive/detective/corrective", "implementation": "implementation_steps", "effectiveness": "High/Medium/Low"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_description", "likelihood": "High/Medium/Low", "impact": "specific_impact", "probability_score": 85}}], "mitigations": [{{"name": "specific_mitigation_name", "type": "preventive/detective/corrective", "implementation": "implementation_steps", "effectiveness": "High/Medium/Low"}}]}}
 
-Focus on threats appropriate for this component type. Max 3 threats, 3 mitigations."""
+probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific component? Consider: component type, configuration, connections, deployment context.
+
+Focus on threats appropriate for this component type."""
 
             # Reduce max_tokens to prevent overflow
-            response = client.generate_response(prompt, max_tokens=600, temperature=0.1)
+            response = client.generate_response(prompt, max_tokens=600, temperature=0.1, context=f"Traditional component analysis: {component_name}")
 
             # Use advanced parsing with recovery
             recovery_result = _parse_partial_json_threats(response, component_name)
@@ -512,8 +540,20 @@ Focus on threats appropriate for this component type. Max 3 threats, 3 mitigatio
             if recovery_method == 'partial_recovery':
                 console.print(Text("[RECOVERY]", style="bold cyan"), f"Partial data recovered for {component_name} using fallback parsing")
 
+            # Report REAL progress per traditional component processed
+            if progress_callback:
+                current_component = processed_count + i + 1
+                progress_percent = base_progress + int((current_component / total_count) * (max_progress - base_progress))
+                progress_callback(progress_percent, f"🤖 Analyzed {current_component}/{total_count} components ({component_name})")
+
         except Exception as e:
             console.print(Text("[WARN]", style="bold yellow"), f"Failed to analyze component {component_name}: {e}")
+
+            # Report progress even for failed traditional components
+            if progress_callback:
+                current_component = processed_count + i + 1
+                progress_percent = base_progress + int((current_component / total_count) * (max_progress - base_progress))
+                progress_callback(progress_percent, f"🤖 Processed {current_component}/{total_count} components (error in {component_name})")
 
     return {
         'threats': threats,

@@ -8,10 +8,10 @@ import os
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from rich.console import Console
+from utils.console import console
 from rich.text import Text
 
-console = Console()
+
 
 # Global vector store instance for caching
 _vector_store_instance = None

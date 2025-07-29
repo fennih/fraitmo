@@ -1,49 +1,56 @@
 #!/usr/bin/env python3
 """
 FRAITMO - Framework for Robust AI Threat Modeling Operations
-Main entry point for threat analysis pipeline
+Main entry point for the FRAITMO threat modeling tool.
 """
 
-import os
 import sys
-import argparse
+import os
 import json
-import csv
-import logging
+import argparse
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-from dotenv import load_dotenv
+from typing import Dict, Any, List, Optional, Set, Tuple
+
 from rich.console import Console
 from rich.text import Text
+from rich.table import Table
+from rich.panel import Panel
+from rich.tree import Tree
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.align import Align
 
-# Add the project root to Python path for imports
-project_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_root)
+# Import local modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import the complete pipeline
-from pipeline.graph import run_fraitmo_analysis
-from exporter.export_results import export_threats_to_json, export_threats_to_csv  # Export functions
+try:
+    from utils.console import set_console_verbosity, console
+    from dfd_parser.xml_parser import extract_from_xml
+    from rag.llm_client import UnifiedLLMClient
+    from pipeline.graph import run_fraitmo_analysis
+except ImportError as e:
+    print(f"Import error: {e}")
+    print("Please ensure all dependencies are installed and modules are in the correct location.")
+    sys.exit(1)
 
 
-def format_components_summary(console: Console, ai_components, traditional_components):
+def format_components_summary(ai_components, traditional_components):
     """Format component classification summary"""
     console.print(Text("[INFO]", style="bold blue"), "COMPONENT CLASSIFICATION:")
     console.print(Text("[INFO]", style="bold blue"), f"AI Components: {len(ai_components)}")
-    for comp in ai_components:
-        name = comp.get('name', 'Unknown')
-        # Remove everything in parentheses
-        clean_name = name.split('(')[0].strip()
-        console.print(f"  - {clean_name}")
+
+    if ai_components:
+        for comp in ai_components:
+            comp_name = comp.get('name', 'Unknown')
+            comp_type = comp.get('component_type', 'Unknown')
+            risk_factors = comp.get('risk_factors', [])
+            console.print(f"  - {comp_name} ({comp_type})")
+            if risk_factors:
+                console.print(f"    Risk factors: {', '.join(risk_factors)}")
 
     console.print(Text("[INFO]", style="bold blue"), f"Traditional Components: {len(traditional_components)}")
-    for comp in traditional_components:
-        name = comp.get('name', 'Unknown')
-        # Remove everything in parentheses
-        clean_name = name.split('(')[0].strip()
-        console.print(f"  - {clean_name}")
 
 
-def format_threat_summary(console: Console, threats_found, ai_threats, traditional_threats):
+def format_threat_summary(threats_found, ai_threats, traditional_threats):
     """Format threat identification summary"""
     console.print(Text("[INFO]", style="bold blue"), "THREAT IDENTIFICATION:")
     console.print(Text("[INFO]", style="bold blue"), f"Total Threats Found: {len(threats_found)}")
@@ -54,26 +61,11 @@ def format_threat_summary(console: Console, threats_found, ai_threats, tradition
         console.print("All Threats Found:")
         for i, threat in enumerate(threats_found, 1):
             console.print(f"  {i}. {threat.get('name', 'Unknown Threat')}")
-            console.print(f"     Severity: {threat.get('severity', 'Unknown')}")
-
-            # Handle target_component - can be string or dict
-            target_component = threat.get('target_component', 'Unknown')
-            if isinstance(target_component, dict):
-                target_name = target_component.get('name', 'Unknown')
-            else:
-                target_name = str(target_component)
-            console.print(f"     Target: {target_name}")
-
-            # Add description for more context
-            description = threat.get('description', '')
-            if description:
-                # Truncate long descriptions
-                short_desc = description[:100] + '...' if len(description) > 100 else description
-                console.print(f"     Description: {short_desc}")
-            console.print()  # Empty line between threats
+    else:
+        console.print(Text("[INFO]", style="bold blue"), "No threats identified")
 
 
-def format_mitigation_summary(console: Console, mitigations, implementation_plan):
+def format_mitigation_summary(mitigations, implementation_plan):
     """Format mitigation proposal summary"""
     console.print(Text("[INFO]", style="bold blue"), "MITIGATION PROPOSAL:")
     console.print(Text("[INFO]", style="bold blue"), f"Total Mitigations: {len(mitigations)}")
@@ -93,7 +85,7 @@ def format_mitigation_summary(console: Console, mitigations, implementation_plan
         console.print(f"  Estimated Completion: {implementation_plan.get('estimated_completion', 'Unknown')}")
 
 
-def format_llm_analysis(console: Console, threat_analysis, risk_assessment):
+def format_llm_analysis(threat_analysis, risk_assessment):
     """Format LLM analysis results"""
     console.print(Text("[INFO]", style="bold blue"), "LLM ANALYSIS:")
     console.print(Text("[INFO]", style="bold blue"), f"Overall Risk: {risk_assessment.get('overall_risk', 'Unknown')}")
@@ -116,7 +108,7 @@ def format_llm_analysis(console: Console, threat_analysis, risk_assessment):
         console.print(f"  {summary}")
 
 
-def format_direct_analysis_summary(console: Console, result: Dict[str, Any]):
+def format_direct_analysis_summary(result: Dict[str, Any]):
     """Format direct LLM analysis summary"""
     console.print(Text("[INFO]", style="bold blue"), "DIRECT LLM ANALYSIS SUMMARY:")
 
@@ -146,339 +138,440 @@ def format_direct_analysis_summary(console: Console, result: Dict[str, Any]):
                     console.print(f"  - {priority}: {count}")
 
 
-def display_results(result: Dict[str, Any]):
-    """Display comprehensive analysis results"""
-    console = Console()
+def display_results_progressive(result: Dict[str, Any]):
+    """Display analysis results progressively as they're processed"""
+    if not result:
+        print("ERROR: No results to display")
+        return result
 
-    console.print("=" * 80)
-    console.print(Text("[OK]", style="bold green"), "FRAITMO THREAT ANALYSIS RESULTS")
-    console.print("=" * 80)
+    print("\n" + "="*80)
+    print("🚨 FRAITMO THREAT ANALYSIS RESULTS")
+    print("="*80)
 
-    # Component classification
-    format_components_summary(
-        console,
-        result.get('ai_components', []),
-        result.get('traditional_components', [])
-    )
+    # Collect threats from all sources
+    all_threats = []
+    possible_threat_fields = [
+        'threats_found', 'llm_threats', 'traditional_threats', 'ai_threats',
+        'cross_component_threats', 'rag_threats', 'filtered_threats',
+        'final_threats', 'threats', 'all_threats'
+    ]
 
-    # Threat identification (combined from both paths)
-    all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
-    format_threat_summary(
-        console,
-        all_threats,
-        result.get('ai_threats', []),
-        result.get('traditional_threats', [])
-    )
+    for field in possible_threat_fields:
+        threats = result.get(field, [])
+        if threats and isinstance(threats, list):
+            all_threats.extend(threats)
 
-    # LLM analysis
-    format_llm_analysis(
-        console,
-        result.get('threat_analysis', {}),
-        result.get('risk_assessment', {})
-    )
+    # Remove duplicates by name
+    unique_threats = []
+    seen_names = set()
+    for threat in all_threats:
+        if isinstance(threat, dict):
+            name = threat.get('name', threat.get('threat_name', f"Threat_{len(unique_threats)}"))
+            if name not in seen_names:
+                unique_threats.append(threat)
+                seen_names.add(name)
 
-    # Mitigation proposal (combined from both paths) - only if mitigations were generated
-    all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
-    if all_mitigations:
-        format_mitigation_summary(
-            console,
-            all_mitigations,
-            result.get('rag_implementation_plan', {}) or result.get('llm_implementation_plan', {})
-        )
+    # NO PROBABILITY FILTERING: Treat all threats as relevant
+    relevant_threats = unique_threats  # Keep ALL threats
+    speculative_threats = []  # No threats are considered speculative anymore
+
+    print(f"🎯 Found {len(relevant_threats)} threats")
+
+    # Sort by severity: Critical > High > Medium > Low > Unknown
+    severity_order = {'critical': 1, 'high': 2, 'medium': 3, 'low': 4, 'unknown': 5}
+    relevant_threats.sort(key=lambda x: severity_order.get(x.get('severity', 'unknown').lower(), 5))
+
+    print("\n" + "="*80)
+    print("📋 THREAT ANALYSIS RESULTS")
+    print("="*80)
+
+    if relevant_threats or speculative_threats:
+        # Sort relevant threats by severity (Critical > High > Medium > Low)
+        severity_order = {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Unknown': 4}
+        relevant_threats.sort(key=lambda t: severity_order.get(t.get('severity', 'Unknown'), 4))
+
+        # Display relevant threats
+        if relevant_threats:
+            pass  # Start displaying directly
+
+        # Display threats ordered by severity
+        for i, threat in enumerate(relevant_threats, 1):
+            print(f"\n🚨 THREAT #{i} of {len(relevant_threats)}")
+            print("-" * 50)
+
+            if isinstance(threat, dict):
+                name = threat.get('name', 'Unknown Threat')
+                severity = threat.get('severity', 'Unknown')
+                description = threat.get('description', 'No description')
+                component = threat.get('component', threat.get('target_component', 'Unknown'))
+
+                print(f"📌 Name: {name}")
+                print(f"⚠️  Severity: {severity}")
+                prob_score = threat.get('probability_score', 0)
+                print(f"🎯 Probability: {prob_score}% (likelihood of being present)")
+
+                # Extract component info in a more conversational way
+                target_details = []
+                comp_name = "Unknown Component"
+                comp_zone = ""
+
+                if isinstance(component, dict):
+                    comp_name = component.get('name', 'Unknown Component')
+                    comp_zone = component.get('zone', component.get('trust_zone', ''))
+                elif isinstance(component, str) and component != 'Unknown':
+                    comp_name = component
+
+                # Display Component in conversational format
+                component_display = comp_name
+                if comp_zone:
+                    component_display = f"{comp_name} in trust zone {comp_zone}"
+                print(f"🏛️  Component: {component_display}")
+                print(f"📝 Description: {description[:200]}{'...' if len(description) > 200 else ''}")
+
+                # Create conversational component description for Target Object
+                if comp_name != "Unknown Component":
+                    if comp_zone:
+                        # Conversational format: "FastAPI in trust zone 2"
+                        target_details.append(f"{comp_name} in trust zone {comp_zone}")
+                    else:
+                        # Just component name if no zone
+                        target_details.append(comp_name)
+
+                # Add AI-specific indicator
+                if threat.get('ai_specific'):
+                    target_details.append("🤖 AI-Specific Component")
+
+                # Add attack vector if available (more concise)
+                if threat.get('attack_vector'):
+                    attack_vector = threat.get('attack_vector')
+                    # Shorten attack vector if too long
+                    if len(attack_vector) > 80:
+                        attack_vector = attack_vector[:77] + "..."
+                    target_details.append(f"Attack Vector: {attack_vector}")
+
+                if target_details:
+                    print(f"🏗️  Target Object: {' | '.join(target_details)}")
+
+                # Show applicability reasoning if available from intelligent assessment
+                if threat.get('applicability_score') is not None:
+                    app_score = threat.get('applicability_score', 'N/A')
+                    app_reasoning = threat.get('applicability_reasoning', '')
+                    if app_reasoning:
+                        print(f"🧠 Applicability Assessment: {app_score}% - {app_reasoning}")
+                    else:
+                        print(f"🧠 Applicability Score: {app_score}%")
+
+            else:
+                print(f"Threat data: {threat}")
+
+                        # Show progress every 20 threats
+            if i % 20 == 0:
+                print(f"\n📈 Progress: {i}/{len(relevant_threats)} threats processed")
+
     else:
-        console.print(Text("[INFO]", style="bold blue"), "MITIGATION PROPOSAL:")
-        console.print(Text("[INFO]", style="dim"), "Mitigation generation skipped (use --mitigation flag to enable)")
+        print("❌ NO THREATS TO DISPLAY")
 
-    # Direct LLM Analysis Summary
-    if result.get('direct_threats') or result.get('direct_mitigations_kb'):
-        format_direct_analysis_summary(console, result)
+    print("\n" + "="*80)
+    if relevant_threats:
+        print(f"✅ Analysis complete: {len(relevant_threats)} threats identified")
+    else:
+        print(f"✅ Analysis complete: No threats identified")
+    print("="*80)
 
-    # Processing status
-    console.print(Text("[INFO]", style="bold blue"), "PROCESSING STATUS:")
-    console.print(f"Status: {result.get('processing_status', 'Unknown')}")
+    # Prepare modified result for reports - all threats are now included
+    modified_result = result.copy()
+    modified_result['all_threats_for_export'] = relevant_threats  # All threats, no flags needed
+    modified_result['displayed_threats_count'] = len(relevant_threats)
+    modified_result['hidden_threats_count'] = 0  # No hidden threats anymore
 
-    if result.get('errors'):
-        console.print(Text("[ERROR]", style="bold red"), f"Errors: {len(result.get('errors', []))}")
-        for error in result.get('errors', []):
-            console.print(f"  - {error}")
-
-    if result.get('warnings'):
-        console.print(Text("[WARN]", style="bold yellow"), f"Warnings: {len(result.get('warnings', []))}")
-        for warning in result.get('warnings', []):
-            console.print(f"  - {warning}")
+    return modified_result
 
 
 def main():
     """Main entry point for FRAITMO analysis"""
-    # Load environment variables
-    load_dotenv()
+    # Parse command line arguments first to get verbosity settings
+    parser = argparse.ArgumentParser(description="FRAITMO - Framework for Robust AI Threat Modeling Operations")
 
-    # Initialize rich console for styled output
-    console = Console()
+    # Input options
+    parser.add_argument("dfd_file", help="Path to the DFD XML file to analyze")
 
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description='FRAITMO - Framework for Robust AI Threat Modeling Operations',
-        epilog="""
-Examples:
-  # Full threat modeling (threats + mitigations)
-  python fraitmo.py dfd.xml --full-threat-modeling
+    # Analysis modes
+    parser.add_argument("--threats", action="store_true", help="Generate threats only (skip mitigations)")
+    parser.add_argument("--full", action="store_true", help="Full analysis with threats and mitigations")
+    parser.add_argument("--mitigation", action="store_true", help="Generate mitigations from existing threats")
+    parser.add_argument("--validate", action="store_true", help="Validate DFD structure")
 
-  # Threats only (faster)
-  python fraitmo.py dfd.xml --threats
+    # Configuration options
+    parser.add_argument("--config", help="Configuration file path")
+    parser.add_argument("--output", "-o", help="Output file path")
+    parser.add_argument("--format", choices=["json", "txt", "html"], default="txt", help="Output format")
 
-  # Generate mitigations from existing threats
-  python fraitmo.py --mitigation threats.json
-  python fraitmo.py --mitigation threats.csv
-
-  # Export to different formats
-  python fraitmo.py dfd.xml --threats --format json --output-dir ./results
-        """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-
-    # Main input: DFD file or mitigation mode
-    parser.add_argument('input_file', nargs='?',
-                       help='Path to DFD XML file or threats JSON/CSV file (for --mitigation mode)')
-
-    # Analysis mode (mutually exclusive)
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument('--full-threat-modeling', action='store_true',
-                           help='Complete analysis: threats + mitigations (default behavior)')
-    mode_group.add_argument('--threats', action='store_true',
-                           help='Threats only (faster, skip mitigation generation)')
-    mode_group.add_argument('--mitigation', action='store_true',
-                           help='Generate mitigations from existing threats file (JSON/CSV)')
-
-    # Output options
-    parser.add_argument('--format', choices=['screen', 'json', 'csv', 'html'],
-                       default='screen', help='Output format (default: screen)')
-    parser.add_argument('--output-dir', default='results',
-                       help='Output directory for files (default: results)')
-
-    # Filtering options
-    parser.add_argument('--severity', choices=['critical', 'high', 'medium', 'low'],
-                       help='Filter threats by minimum severity level')
-    parser.add_argument('--component-type', choices=['ai', 'traditional', 'all'],
-                       default='all', help='Filter by component type (default: all)')
-
-    # Advanced options
-    parser.add_argument('--config',
-                       help='Path to configuration file (JSON)')
-    parser.add_argument('--validate', action='store_true',
-                       help='Validate DFD structure only, no analysis')
-    parser.add_argument('--dry-run', action='store_true',
-                       help='Simulate execution without running analysis')
-
-    # Verbosity
-    verbosity_group = parser.add_mutually_exclusive_group()
-    verbosity_group.add_argument('--verbose', '-v', action='store_true',
-                                help='Verbose output with detailed information')
-    verbosity_group.add_argument('--quiet', '-q', action='store_true',
-                                help='Minimal output, errors only')
-
-    parser.add_argument('--version', action='version', version='FRAITMO')
+    # Verbosity control
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress all output except errors")
 
     args = parser.parse_args()
 
-    # Configure logging based on verbosity
-    if args.quiet:
-        logging.getLogger().setLevel(logging.ERROR)
-    elif args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-    else:
-        logging.getLogger().setLevel(logging.INFO)
+    # Initialize global console for all modules
+    set_console_verbosity(args.verbose, args.quiet)
 
-    # Validation: ensure input file is provided unless using --version
-    if not args.input_file:
-        console.print(Text("[ERROR]", style="bold red"), "Input file is required")
-        parser.print_help()
-        sys.exit(1)
+    # Show banner
+    console.print(Text("[INFO] FRAITMO - Framework for Robust AI Threat Modeling Operations", style="bold blue"))
 
-    # Determine execution mode
+    # Detect LLM providers first
+    if not _detect_llm_providers():
+        return 1
+
+    # Determine analysis mode
     if args.mitigation:
-        # Mitigation-only mode
-        return _run_mitigation_mode(args, console)
+        return _run_mitigation_mode(args)
+    elif args.validate:
+        return _run_validation_mode(args)
     else:
-        # Standard DFD analysis mode
-        return _run_analysis_mode(args, console)
+        return _run_analysis_mode(args)
 
 
-# Support functions for the new CLI workflow
-
-def _run_mitigation_mode(args, console):
+def _run_mitigation_mode(args):
     """Run mitigation generation from existing threats file"""
     threats_file = args.input_file
 
-    if not os.path.exists(threats_file):
+    if not Path(threats_file).exists():
         console.print(Text("[ERROR]", style="bold red"), f"Threats file not found: {threats_file}")
         return 1
 
-    # Determine file format
-    file_ext = Path(threats_file).suffix.lower()
-    if file_ext not in ['.json', '.csv']:
-        console.print(Text("[ERROR]", style="bold red"), "Threats file must be JSON or CSV format")
-        return 1
-
-    if args.dry_run:
-        console.print(Text("[INFO]", style="bold blue"), f"DRY RUN: Would generate mitigations from {threats_file}")
-        return 0
-
-    console.print(Text("[INFO]", style="bold blue"), "FRAITMO - Mitigation Generation Mode")
-    console.print("=" * 80)
-    console.print(Text("[INFO]", style="bold blue"), f"Loading threats from: {threats_file}")
+    console.print(Text("[INFO]", style="bold blue"), f"Generating mitigations from: {threats_file}")
 
     try:
-        # Load threats from file
-        threats = _load_threats_from_file(threats_file, file_ext)
+        with open(threats_file, 'r') as f:
+            threats_data = json.load(f)
 
-        # Apply severity filter if specified
-        if args.severity:
-            threats = _filter_threats_by_severity(threats, args.severity)
-            console.print(Text("[INFO]", style="bold blue"), f"Filtered to {len(threats)} threats (severity >= {args.severity})")
+        mitigations = _generate_mitigations_from_threats(threats_data['threats'])
 
-        # Apply component type filter if specified
-        if args.component_type != 'all':
-            threats = _filter_threats_by_component_type(threats, args.component_type)
-            console.print(Text("[INFO]", style="bold blue"), f"Filtered to {len(threats)} threats (type: {args.component_type})")
+        # Save results
+        output_file = args.output or f"{Path(threats_file).stem}_mitigations.json"
 
-        if not threats:
-            console.print(Text("[WARN]", style="bold yellow"), "No threats found after filtering")
-            return 0
+        with open(output_file, 'w') as f:
+            json.dump({"mitigations": mitigations}, f, indent=2)
 
-        # Generate mitigations
-        mitigations = _generate_mitigations_from_threats(threats, console)
-
-        # Create result structure
-        result = {
-            'threats_found': threats,
-            'llm_mitigations': mitigations,
-            'processing_status': 'completed',
-            'source_file': threats_file,
-            'filters_applied': {
-                'severity': args.severity,
-                'component_type': args.component_type
-            }
-        }
-
-        # Output results
-        _output_results(result, args, console, mode='mitigation')
-
-        console.print(Text("[OK]", style="bold green"), f"Mitigation generation complete: {len(mitigations)} mitigations generated")
+        console.print(Text("[OK]", style="bold green"), f"Mitigations saved to: {output_file}")
         return 0
 
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"Mitigation generation failed: {str(e)}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+        console.print(Text("[ERROR]", style="bold red"), f"Failed to generate mitigations: {e}")
         return 1
 
 
-def _run_analysis_mode(args, console):
-    """Run standard DFD threat analysis"""
-    dfd_file = args.input_file
-
-    if not os.path.exists(dfd_file):
+def _run_analysis_mode(args):
+    """Run main threat analysis mode"""
+    # Validate input file
+    dfd_file = Path(args.dfd_file)
+    if not dfd_file.exists():
         console.print(Text("[ERROR]", style="bold red"), f"DFD file not found: {dfd_file}")
         return 1
 
-    # Validate DFD file extension
-    if not dfd_file.lower().endswith('.xml'):
-        console.print(Text("[WARN]", style="bold yellow"), f"Expected XML file, got: {Path(dfd_file).suffix}")
-
-    # Determine analysis mode
-    if args.threats:
-        skip_mitigation = True
-        mode_desc = "Threats Analysis Only"
-    elif args.full_threat_modeling:
-        skip_mitigation = False
-        mode_desc = "Full Threat Modeling (Threats + Mitigations)"
-    else:
-        # Default behavior: full analysis
-        skip_mitigation = False
-        mode_desc = "Full Threat Modeling (Default)"
-
-    if args.dry_run:
-        console.print(Text("[INFO]", style="bold blue"), f"DRY RUN: Would run {mode_desc} on {dfd_file}")
-        return 0
-
-    if args.validate:
-        console.print(Text("[INFO]", style="bold blue"), "DFD Validation Mode")
-        return _validate_dfd_only(dfd_file, console)
-
-    console.print(Text("[INFO]", style="bold blue"), "FRAITMO - Framework for Robust AI Threat Modeling Operations")
-    console.print("=" * 80)
-    console.print(Text("[INFO]", style="bold blue"), f"Mode: {mode_desc}")
+    # Show mode info
+    mode = "Threats Only" if args.threats else "Full Analysis" if args.full else "Threats Only (default)"
+    console.print(Text("[INFO]", style="bold blue"), f"Mode: {mode}")
     console.print(Text("[INFO]", style="bold blue"), f"Analyzing DFD: {dfd_file}")
 
-    # Initialize LLM client detection
-    _detect_llm_providers(console)
+    # Detect LLM providers early
+    if not _detect_llm_providers():
+        return 1
 
-    # Run the analysis
+    # Load configuration
+    config = {}
+    if args.config:
+        try:
+            with open(args.config, 'r') as f:
+                config = json.load(f)
+            console.print(Text("[OK]", style="bold green"), f"Configuration loaded from: {args.config}")
+        except Exception as e:
+            console.print(Text("[WARN]", style="bold yellow"), f"Failed to load config: {e}")
+
+    # Determine mitigation mode
+    skip_mitigation = args.threats or not args.full
+
     try:
-        # Load custom config if provided
-        config = None
-        if args.config:
-            config = _load_config_file(args.config, console)
+        # Start progress
+        console.start_progress("Running FRAITMO threat analysis...")
 
-        # Run the analysis
-        result = run_fraitmo_analysis(dfd_file, config=config, skip_mitigation=skip_mitigation)
+        # Run analysis with progress updates
+        result = run_fraitmo_analysis_with_progress(dfd_file, config=config, skip_mitigation=skip_mitigation, verbose=args.verbose, quiet=args.quiet)
 
-        if result:
-            # Apply filters if specified
-            if args.severity or args.component_type != 'all':
-                result = _apply_filters(result, args, console)
+        # Stop progress
+        console.stop_progress()
 
-            # Output results
-            _output_results(result, args, console, mode='analysis')
-
-            # Summary
-            total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
-            total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
-
-            console.print(Text("[OK]", style="bold green"), f"Analysis complete: {total_threats} threats")
-            if not skip_mitigation:
-                console.print(Text("[OK]", style="bold green"), f"Mitigations generated: {total_mitigations}")
-
-            return 0
-        else:
-            console.print(Text("[ERROR]", style="bold red"), "Analysis failed to produce results")
+        if not result:
+            console.print(Text("[ERROR]", style="bold red"), "Analysis failed!")
             return 1
 
+        # Display results (this will now show progressive results)
+        modified_result = display_results_progressive(result)
+
+        # Export results if requested (use modified result with [LOW PROB] flags)
+        if args.output:
+            _output_results(modified_result, args)
+
+        return 0
+
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"Analysis failed: {str(e)}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+        console.stop_progress()
+        console.print(Text("[ERROR]", style="bold red"), f"FRAITMO analysis failed: {e}")
+        console.print(Text("[ERROR]", style="bold red"), "Analysis failed!")
+        if "errors" in str(e):
+            for error in str(e).split("\\n"):
+                if error.strip():
+                    console.print(Text("[ERROR]", style="bold red"), f"  - {error.strip()}")
         return 1
 
 
-def _detect_llm_providers(console):
+def run_fraitmo_analysis_with_progress(dfd_xml_path: str, config: Dict[str, Any] = None, skip_mitigation: bool = False, verbose: bool = False, quiet: bool = False):
+    """Run FRAITMO analysis with REAL-TIME progress updates from actual node execution"""
+
+    console.update_progress(1, "🔧 Initializing FRAITMO pipeline...")
+
+    # Import here to avoid circular dependency
+    from pipeline.graph import create_graph
+    import threading
+
+    # REAL progress tracking based on actual work completed
+    progress_lock = threading.Lock()
+    current_progress = 5
+
+    def progress_callback(progress_percent: int, message: str):
+        """Callback for nodes to report REAL progress"""
+        nonlocal current_progress
+        with progress_lock:
+            if progress_percent > current_progress:
+                current_progress = progress_percent
+                console.update_progress(progress_percent, message)
+
+    try:
+        # Create the graph with progress callback
+        app = create_graph(skip_mitigation=skip_mitigation, progress_callback=progress_callback)
+
+        # Prepare initial state
+        from pipeline.state import ThreatAnalysisState
+        initial_state = ThreatAnalysisState(
+            dfd_xml_path=dfd_xml_path,
+            dfd_content=None,
+            parsed_data=None,
+            dfd_model=None,
+            ai_components=[],
+            traditional_components=[],
+            component_classification={},
+            ai_knowledge_base=[],
+            general_knowledge_base=[],
+            routing_strategy=[],
+            threats_found=[],
+            ai_threats=[],
+            traditional_threats=[],
+            cross_zone_threats=[],
+            llm_threats=[],
+            llm_analysis_summary={},
+            cross_component_threats=[],
+            trust_boundary_count=0,
+            data_flow_count=0,
+            threat_analysis={},
+            risk_assessment={},
+            rag_mitigations=[],
+            rag_implementation_plan={},
+            llm_mitigations=[],
+            llm_implementation_plan={},
+            llm_mitigation_summary={},
+            implementation_tracker={},
+            filtered_threats=[],
+            filtered_mitigations=[],
+            threat_mitigation_mapping={},
+            quality_filter_applied=False,
+            processing_status="starting",
+            llm_analysis_status="pending",
+            llm_mitigation_status="pending",
+            current_node="start",
+            errors=[],
+            warnings=[],
+            skip_mitigation=skip_mitigation
+        )
+
+        config = config or {"configurable": {"thread_id": "fraitmo-analysis"}}
+
+        # Use streaming - nodes will report their own REAL progress
+        final_result = None
+
+        for chunk in app.stream(initial_state, config=config):
+            for node_name, node_output in chunk.items():
+                # Nodes report their own progress via callback
+                # Just store the final result
+                if isinstance(node_output, dict):
+                    final_result = node_output
+
+        # Final progress update
+        with progress_lock:
+            console.update_progress(100, "✅ Analysis complete!")
+
+        return final_result
+
+    except Exception as e:
+        with progress_lock:
+            console.update_progress(100, "❌ Analysis failed!")
+        raise e
+
+
+def _run_validation_mode(args):
+    """Run DFD validation mode"""
+    dfd_file = Path(args.dfd_file)
+    if not dfd_file.exists():
+        console.print(Text("[ERROR]", style="bold red"), f"DFD file not found: {dfd_file}")
+        return 1
+
+    console.print(Text("[INFO]", style="bold blue"), f"Validating DFD structure: {dfd_file}")
+
+    try:
+        result = extract_from_xml(str(dfd_file))
+
+        console.print(Text("[OK]", style="bold green"), "DFD validation successful!")
+        console.print(Text("[INFO]", style="bold blue"), f"Components found: {len(result.get('components', {}))}")
+        console.print(Text("[INFO]", style="bold blue"), f"Connections found: {len(result.get('connections', []))}")
+        console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries found: {len(result.get('trust_boundaries', []))}")
+
+        return 0
+
+    except Exception as e:
+        console.print(Text("[ERROR]", style="bold red"), f"DFD validation failed: {e}")
+        return 1
+
+
+def _detect_llm_providers():
     """Detect available LLM providers"""
     console.print(Text("[INFO]", style="bold blue"), "Detecting available LLM providers...")
-    from rag.llm_client import UnifiedLLMClient
 
     try:
         test_client = UnifiedLLMClient()
 
-        # Check if any models are available
         if not test_client.available_models:
             console.print(Text("[ERROR]", style="bold red"), "No LLM models detected!")
             console.print(Text("[ERROR]", style="bold red"), "FRAITMO requires an active LLM model to function.")
             console.print(Text("[INFO]", style="bold blue"), "Please start one of the following:")
             console.print(Text("[INFO]", style="bold blue"), "  • Ollama: ollama serve")
             console.print(Text("[INFO]", style="bold blue"), "  • LM Studio: Start LM Studio and load a model")
-            sys.exit(1)
-        else:
-            console.print(Text("[OK]", style="bold green"), f"LLM models detected: {len(test_client.available_models)} available")
-            console.print(Text("[INFO]", style="bold blue"), f"Active model: {test_client.active_model} ({test_client.active_provider})")
+            return False
+
+        # Count models by provider
+        provider_counts = {}
+        for model in test_client.available_models:
+            provider = getattr(model, 'provider', 'unknown')
+            provider_counts[provider] = provider_counts.get(provider, 0) + 1
+
+        # Show detected models
+        for provider, count in provider_counts.items():
+            console.print(Text("[INFO]", style="bold blue"), f"Found {count} models in {provider}")
+
+        console.print(Text("[OK]", style="bold green"), f"Using: {test_client.active_model} via {test_client.active_provider}")
+        return True
 
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"LLM detection failed: {e}")
-        console.print(Text("[ERROR]", style="bold red"), "FRAITMO requires an active LLM model to function.")
-        console.print(Text("[INFO]", style="bold blue"), "Please start Ollama or LM Studio and try again.")
-        sys.exit(1)
+        console.print(Text("[ERROR]", style="bold red"), f"Failed to detect LLM provider: {e}")
+        return False
 
 
 def _load_config_file(config_path, console):
@@ -589,73 +682,38 @@ def _filter_threats_by_component_type(threats, component_type):
     return filtered
 
 
-def _generate_mitigations_from_threats(threats, console):
+def _generate_mitigations_from_threats(threats):
     """Generate mitigations from existing threats using LLM"""
     mitigations = []
 
     try:
-        from rag.llm_client import UnifiedLLMClient
         client = UnifiedLLMClient()
 
-        if not client.available_models:
-            console.print(Text("[WARN]", style="bold yellow"), "No LLM models available - cannot generate mitigations")
-            return []
+        for threat in threats:
+            prompt = f"""
+            Generate specific mitigation strategies for this security threat:
 
-        console.print(Text("[INFO]", style="bold blue"), f"Generating mitigations for {len(threats)} threats...")
+            Threat: {threat.get('name', 'Unknown')}
+            Description: {threat.get('description', 'No description')}
+            Severity: {threat.get('severity', 'Unknown')}
+            Component: {threat.get('component', 'Unknown')}
 
-        for i, threat in enumerate(threats, 1):
-            console.print(Text("[INFO]", style="bold blue"), f"Processing threat {i}/{len(threats)}: {threat.get('name', 'Unknown')}")
+            Provide practical, actionable mitigation steps.
+            """
 
-            prompt = f"""You are a cybersecurity expert. Generate specific mitigations for this threat:
+            response = client.generate_response(prompt, max_tokens=300)
 
-Threat: {threat.get('name', 'Unknown')}
-Severity: {threat.get('severity', 'Unknown')}
-Description: {threat.get('description', 'No description')}
-Target Component: {threat.get('target_component', 'Unknown')}
+            mitigation = {
+                "threat_name": threat.get('name'),
+                "mitigation_strategy": response,
+                "component": threat.get('component'),
+                "severity": threat.get('severity')
+            }
 
-Provide 2-3 specific mitigation controls in JSON format:
-[{{
-    "name": "mitigation_name",
-    "type": "preventive/detective/corrective",
-    "implementation": "detailed_implementation_steps",
-    "priority": "critical/high/medium/low",
-    "effort": "low/medium/high",
-    "effectiveness": "high/medium/low"
-}}]
-
-Only JSON, no additional text."""
-
-            try:
-                response = client.generate_response(prompt, max_tokens=800, temperature=0.1)
-
-                # Parse mitigations from response
-                import re
-                json_match = re.search(r'\[.*\]', response, re.DOTALL)
-                if json_match:
-                    parsed_mitigations = json.loads(json_match.group())
-                    for mitigation in parsed_mitigations:
-                        mitigation['threat_id'] = threat.get('id', f'THREAT_{i}')
-                        mitigation['threat_name'] = threat.get('name', 'Unknown')
-                        mitigation['source'] = 'llm_generated'
-                        mitigations.append(mitigation)
-
-            except Exception as e:
-                console.print(Text("[WARN]", style="bold yellow"), f"Failed to generate mitigation for threat {i}: {e}")
-                # Add fallback mitigation
-                mitigations.append({
-                    'name': f'Security Review for {threat.get("name", "Unknown Threat")}',
-                    'type': 'preventive',
-                    'implementation': f'Conduct security review to address {threat.get("name", "Unknown Threat")}',
-                    'priority': threat.get('severity', 'medium').lower(),
-                    'effort': 'medium',
-                    'effectiveness': 'medium',
-                    'threat_id': threat.get('id', f'THREAT_{i}'),
-                    'threat_name': threat.get('name', 'Unknown'),
-                    'source': 'fallback'
-                })
+            mitigations.append(mitigation)
 
     except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"Mitigation generation failed: {e}")
+        console.print(Text("[ERROR]", style="bold red"), f"Failed to generate mitigations: {e}")
 
     return mitigations
 
@@ -677,35 +735,124 @@ def _apply_filters(result, args, console):
     return result
 
 
-def _output_results(result, args, console, mode='analysis'):
-    """Output results in the specified format"""
-    if args.format == 'screen':
-        # Display to screen
-        display_results(result)
+def _output_results(result: Dict[str, Any], args):
+    """Output results to file"""
+    if not args.output:
+        return
 
-    elif args.format == 'json':
-        # Export to JSON
-        json_file = export_threats_to_json(result, args.output_dir)
-        console.print(Text("[OK]", style="bold green"), f"Results exported to JSON: {json_file}")
+    try:
+        output_path = Path(args.output)
 
-        # Show summary
-        total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
-        console.print(Text("[INFO]", style="bold blue"), f"Total threats exported: {total_threats}")
+        if args.format == "json":
+            with open(output_path, 'w') as f:
+                json.dump(result, f, indent=2, default=str)
+        elif args.format == "txt":
+            with open(output_path, 'w') as f:
+                f.write("FRAITMO THREAT ANALYSIS RESULTS\n")
+                f.write("=" * 50 + "\n\n")
 
-    elif args.format == 'csv':
-        # Export to CSV
-        csv_file = export_threats_to_csv(result, args.output_dir)
-        console.print(Text("[OK]", style="bold green"), f"Results exported to CSV: {csv_file}")
+                threats = result.get('threats_found', [])
+                f.write(f"Total Threats Found: {len(threats)}\n")
 
-        # Show summary
-        total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
-        console.print(Text("[INFO]", style="bold blue"), f"Total threats exported: {total_threats}")
+                for i, threat in enumerate(threats, 1):
+                    f.write(f"\n{i}. {threat.get('name', 'Unknown')}\n")
+                    f.write(f"   Severity: {threat.get('severity', 'Unknown')}\n")
+                    f.write(f"   Component: {threat.get('component', 'Unknown')}\n")
+                    f.write(f"   Description: {threat.get('description', 'No description')}\n")
 
-    elif args.format == 'html':
-        # HTML format (future implementation)
-        console.print(Text("[WARN]", style="bold yellow"), "HTML format not yet implemented - showing on screen instead")
-        display_results(result)
+        console.print(Text("[OK]", style="bold green"), f"Results saved to: {output_path}")
+
+    except Exception as e:
+        console.print(Text("[ERROR]", style="bold red"), f"Failed to save results: {e}")
+
+
+def _display_threats_table(threats):
+    """Display threats in a formatted table"""
+    table = Table(title="🚨 Identified Threats")
+    table.add_column("Threat", style="cyan", no_wrap=True)
+    table.add_column("Component", style="magenta")
+    table.add_column("Severity", style="red")
+    table.add_column("Description", style="white")
+
+    for threat in threats:
+        threat_name = threat.get('name', 'Unknown Threat')
+        component = threat.get('component_name', 'Unknown')
+        severity = threat.get('severity', 'Unknown')
+        description = threat.get('description', 'No description available')[:80] + "..."
+
+        table.add_row(threat_name, component, severity, description)
+
+    console.print(table)
+
+
+def _display_mitigations_table(mitigations):
+    """Display mitigations in a formatted table"""
+    table = Table(title="🛡️ Proposed Mitigations")
+    table.add_column("Mitigation", style="green", no_wrap=True)
+    table.add_column("Priority", style="yellow")
+    table.add_column("Description", style="white")
+
+    for mitigation in mitigations:
+        mit_name = mitigation.get('name', 'Unknown Mitigation')
+        priority = mitigation.get('priority', 'Unknown')
+        description = mitigation.get('description', 'No description available')[:80] + "..."
+
+        table.add_row(mit_name, priority, description)
+
+    console.print(table)
+
+
+def _display_comprehensive_summary(result):
+    """Display comprehensive analysis summary"""
+    direct_threats = result.get('llm_threats', [])
+    direct_mitigations = result.get('llm_mitigations', [])
+    mitigation_summary = result.get('mitigation_summary', {})
+
+    console.print(Text("[INFO]", style="bold blue"), "DIRECT LLM ANALYSIS SUMMARY:")
+
+    if direct_threats:
+        ai_threats = len([t for t in direct_threats if t.get('ai_specific', False)])
+        traditional_threats = len([t for t in direct_threats if not t.get('ai_specific', False)])
+
+        console.print(Text("[INFO]", style="bold blue"), f"Direct Threats Found: {len(direct_threats)}")
+        console.print(Text("[INFO]", style="bold blue"), f"Direct Mitigations Generated: {len(direct_mitigations)}")
+
+        if ai_threats > 0 or traditional_threats > 0:
+            console.print(Text("[INFO]", style="bold blue"), f"AI-Specific Threats: {ai_threats}")
+            console.print(Text("[INFO]", style="bold blue"), f"Traditional Threats: {traditional_threats}")
+
+    if mitigation_summary:
+        console.print(Text("[INFO]", style="bold blue"), f"Estimated Timeline: {mitigation_summary.get('estimated_timeline', 'Unknown')}")
+
+
+def _display_detailed_threat_analysis(detailed_analysis):
+    """Display detailed threat analysis if available"""
+    if isinstance(detailed_analysis, str):
+        panel = Panel(detailed_analysis, title="🔍 Detailed Threat Analysis", border_style="blue")
+        console.print(panel)
+
+
+def _display_final_summary(result):
+    """Display final analysis summary"""
+    all_threats = result.get('threats_found', []) + result.get('llm_threats', []) + result.get('rag_threats', [])
+    all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
+
+    # Filter threats that actually have mitigations
+    threats_with_mitigations = []
+    if result.get('skip_mitigation', True):
+        console.print(Text("[INFO]", style="bold blue"), "MITIGATION PROPOSAL:")
+        console.print(Text("[INFO]", style="dim"), "Mitigation generation skipped (use --mitigation flag to enable)")
+    else:
+        threats_with_mitigations = [t for t in all_threats if any(m.get('threat_id') == t.get('id') for m in all_mitigations)]
+
+    console.print(Text("[INFO]", style="bold blue"), "PROCESSING STATUS:")
+    console.print(f"✓ Threats identified: {len(all_threats)}")
+    if not result.get('skip_mitigation', True):
+        console.print(f"✓ Mitigations proposed: {len(all_mitigations)}")
+        console.print(f"✓ Threats with mitigations: {len(threats_with_mitigations)}")
+
+    console.print(Text("[OK]", style="bold green"), "FRAITMO Analysis Complete!")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

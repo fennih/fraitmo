@@ -57,7 +57,7 @@ jobs:
         echo "🔍 Testing critical imports..."
         python -c "
         try:
-            from pipeline.graph import create_fraitmo_graph, run_fraitmo_analysis
+            from pipeline.graph import create_graph, run_fraitmo_analysis
             from pipeline.state import ThreatAnalysisState
             from rag.llm_client import UnifiedLLMClient
             from models.schema import DataFlowDiagram

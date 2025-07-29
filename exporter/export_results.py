@@ -15,20 +15,24 @@ def export_threats_to_json(result: Dict[str, Any], output_dir: str = "results") 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Use filtered results if quality filter was applied, otherwise use all threats
-    if result.get('quality_filter_applied', False):
+    # Use export-ready threats with [LOW PROB] flags if available
+    if result.get('all_threats_for_export'):
+        all_threats = result.get('all_threats_for_export', [])
+    elif result.get('quality_filter_applied', False):
         all_threats = result.get('filtered_threats', [])
-        all_mitigations = result.get('filtered_mitigations', [])
-        threat_mitigation_mapping = result.get('threat_mitigation_mapping', {})
     else:
         # Fallback to original combined threats
         all_threats = result.get('threats_found', []) + result.get('llm_threats', [])
-        all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
-        threat_mitigation_mapping = {}
+        # Add cross-component threats to the export
+        cross_component_threats = result.get('cross_component_threats', [])
+        all_threats.extend(cross_component_threats)
 
-    # Add cross-component threats to the export
-    cross_component_threats = result.get('cross_component_threats', [])
-    all_threats.extend(cross_component_threats)
+    # Get mitigations
+    all_mitigations = result.get('filtered_mitigations', [])
+    if not all_mitigations:
+        all_mitigations = result.get('rag_mitigations', []) + result.get('llm_mitigations', [])
+
+    threat_mitigation_mapping = result.get('threat_mitigation_mapping', {})
 
     # Add progressive numbering to threats
     for i, threat in enumerate(all_threats, 1):
@@ -217,8 +221,10 @@ def export_threats_to_csv(result: Dict[str, Any], output_dir: str = "results") -
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Use filtered results if quality filter was applied
-    if result.get('quality_filter_applied', False):
+    # Use export-ready threats with [LOW PROB] flags if available
+    if result.get('all_threats_for_export'):
+        all_threats = result.get('all_threats_for_export', [])
+    elif result.get('quality_filter_applied', False):
         all_threats = result.get('filtered_threats', [])
     else:
         # Fallback to original combined threats
@@ -232,7 +238,7 @@ def export_threats_to_csv(result: Dict[str, Any], output_dir: str = "results") -
     headers = [
         'threat_id', 'name', 'severity', 'likelihood', 'impact',
         'description', 'target_component', 'component_type',
-        'ai_specific', 'source', 'category', 'mitigation_available'
+        'ai_specific', 'source', 'category', 'mitigation_available', 'low_probability'
     ]
 
     # Write CSV file
@@ -262,7 +268,8 @@ def export_threats_to_csv(result: Dict[str, Any], output_dir: str = "results") -
                 threat.get('ai_specific', False),
                 threat.get('source', 'Unknown'),
                 threat.get('category', 'Unknown'),
-                len(threat.get('mitigations', [])) > 0
+                len(threat.get('mitigations', [])) > 0,
+                threat.get('low_probability_threat', False)
             ]
             writer.writerow(row)
 
@@ -301,6 +308,9 @@ def export_full_report(result: Dict[str, Any], output_dir: str = "results") -> D
 
         f.write("THREAT SUMMARY:\n")
         f.write(f"Total Threats: {len(all_threats)}\n")
+        if result.get('displayed_threats_count') is not None:
+            f.write(f"Displayed Threats: {result.get('displayed_threats_count', 0)}\n")
+            f.write(f"Hidden Low-Probability Threats: {result.get('hidden_threats_count', 0)}\n")
         f.write(f"RAG Path Threats: {len(result.get('threats_found', []))}\n")
         f.write(f"LLM Path Threats: {len(result.get('llm_threats', []))}\n")
         f.write(f"AI-Specific Threats: {len(result.get('ai_threats', []))}\n")

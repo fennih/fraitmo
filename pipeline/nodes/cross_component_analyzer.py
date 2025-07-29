@@ -1,33 +1,34 @@
 # Cross-Component Threat Analysis Node - Analyzes data flows and trust boundary crossings
 
 from typing import Dict, Any, List
-from rich.console import Console
+from utils.console import console
 from rich.text import Text
 
-console = Console()
+def cross_component_analyzer_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+    """Cross-Component Analysis Node"""
+    console.print(Text("[INFO]", style="bold blue"), "Cross-Component Analysis Node: Analyzing cross-zone threats...")
 
-def cross_component_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Cross-Component Analysis Node
-    Analyzes data flows between components to identify trust boundary threats
-    """
     # Check if cross-component analysis was already completed
     existing_threats = state.get('cross_component_threats', [])
     if existing_threats:
         console.print(Text("[INFO]", style="bold blue"), f"Cross-Component Analysis: Already completed with {len(existing_threats)} threats")
-        return {}  # Return empty dict to avoid duplicating state
-
-    console.print(Text("[INFO]", style="bold blue"), "Cross-Component Analysis: Analyzing data flows and trust boundaries...")
+        return {
+            "cross_component_threats": []
+        }
 
     try:
-        # Get DFD model and components
+        # Skip if no DFD model
         dfd_model = state.get('dfd_model')
-        ai_components = state.get('ai_components', [])
-        traditional_components = state.get('traditional_components', [])
-
         if not dfd_model:
             console.print(Text("[WARN]", style="bold yellow"), "No DFD model available for cross-component analysis")
-            return {"warnings": ["No DFD model available for cross-component analysis"]}
+            return {
+                "cross_component_threats": [],
+                "warnings": ["No DFD model available for cross-component analysis"]
+            }
+
+        # Get DFD model and components
+        ai_components = state.get('ai_components', [])
+        traditional_components = state.get('traditional_components', [])
 
         all_components = ai_components + traditional_components
 
@@ -39,11 +40,17 @@ def cross_component_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             if not client.available_models:
                 error_msg = "Cross-component analysis requires LLM - no models available"
                 console.print(Text("[ERROR]", style="bold red"), error_msg)
-                return {"errors": [error_msg]}
+                return {
+                    "cross_component_threats": [],
+                    "errors": [error_msg]
+                }
         except Exception as e:
             error_msg = f"Failed to initialize LLM for cross-component analysis: {e}"
             console.print(Text("[ERROR]", style="bold red"), error_msg)
-            return {"errors": [error_msg]}
+            return {
+                "cross_component_threats": [],
+                "errors": [error_msg]
+            }
 
         # Analyze data flows between components
         cross_threats = []
@@ -73,10 +80,20 @@ def cross_component_analyzer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "data_flow_count": len(dfd_model.connections) if hasattr(dfd_model, 'connections') else 0
         }
 
-    except Exception as e:
-        error_msg = f"Cross-component analysis error: {e}"
+    except ImportError as e:
+        error_msg = f"Missing dependencies for cross-component analysis: {e}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
-        return {"errors": [error_msg]}
+        return {
+            "cross_component_threats": [],
+            "errors": [error_msg]
+        }
+    except Exception as e:
+        error_msg = f"Cross-component analysis failed: {e}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
+        return {
+            "cross_component_threats": [],
+            "errors": [error_msg]
+        }
 
 def _analyze_trust_boundaries(client, dfd_model, components: List[Dict], skip_mitigation: bool = False) -> List[Dict]:
     """Analyze threats at trust boundary crossings"""
@@ -133,14 +150,16 @@ DATA FLOW: {source_name} → {target_name}
 
 Generate JSON with specific, descriptive threat names (NOT generic categories):
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "boundary_type": "trust_boundary_crossing"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "boundary_type": "trust_boundary_crossing", "probability_score": 85}}]}}
+
+probability_score (0-100): How likely is this trust boundary threat to be ACTUALLY PRESENT in this specific data flow? Consider: component types, trust zone separation, connection security.
 
 EXAMPLES of good names:
 - "Unencrypted Redis Cache Data in Transit to ECS"
 - "Missing Authentication Between Load Balancer and Backend"
 - "Man-in-the-Middle Attack on API Gateway Communications"
 
-Focus on specific technical vulnerabilities: data integrity, authentication gaps, authorization bypasses, encryption weaknesses, man-in-the-middle attacks, privilege escalation across zones. Max 3 threats."""
+Focus on specific technical vulnerabilities: data integrity, authentication gaps, authorization bypasses, encryption weaknesses, man-in-the-middle attacks, privilege escalation across zones."""
 
     try:
         response = client.generate_response(prompt, max_tokens=600, temperature=0.1)
@@ -202,7 +221,9 @@ TRADITIONAL COMPONENT: {trad_name} (Type: {trad_type})
 
 Generate JSON with specific, descriptive threat names (NOT generic categories):
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "integration_type": "ai_traditional"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "integration_type": "ai_traditional", "probability_score": 85}}]}}
+
+probability_score (0-100): How likely is this AI-traditional integration threat to be ACTUALLY PRESENT in this specific system? Consider: AI-traditional component mix, data flow patterns, integration security controls.
 
 EXAMPLES of good names:
 - "Prompt Injection via FastAPI Input Validation Bypass"
@@ -210,7 +231,7 @@ EXAMPLES of good names:
 - "AI Hallucination Data Poisoning via User Upload"
 - "Unauthorized LLM Access Through API Authentication Bypass"
 
-Focus on specific AI-traditional vulnerabilities: AI output validation gaps, prompt injection via traditional inputs, model poisoning through data flows, unauthorized AI access patterns, data leakage between AI and traditional systems. Max 4 threats."""
+Focus on specific AI-traditional vulnerabilities: AI output validation gaps, prompt injection via traditional inputs, model poisoning through data flows, unauthorized AI access patterns, data leakage between AI and traditional systems."""
 
     try:
         response = client.generate_response(prompt, max_tokens=700, temperature=0.1)
@@ -259,7 +280,9 @@ INTERNAL COMPONENTS: {len(components) - len(external_services)} components
 
 Generate JSON with specific, descriptive threat names (NOT generic categories):
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "dependency_type": "external_service"}}]}}
+{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "dependency_type": "external_service", "probability_score": 85}}]}}
+
+probability_score (0-100): How likely is this external dependency threat to be ACTUALLY PRESENT in this specific system? Consider: external service reliability, dependency criticality, security controls.
 
 EXAMPLES of good names:
 - "OpenAI API Rate Limiting Service Disruption"
@@ -268,7 +291,7 @@ EXAMPLES of good names:
 - "External Provider Supply Chain Attack via Dependency"
 - "Vendor Lock-in Risk from Single Cloud Provider"
 
-Focus on specific external risks: service availability disruptions, API rate limiting impacts, data sovereignty violations, vendor lock-in dependencies, service account compromises, supply chain attack vectors. Max 5 threats."""
+Focus on specific external risks: service availability disruptions, API rate limiting impacts, data sovereignty violations, vendor lock-in dependencies, service account compromises, supply chain attack vectors."""
 
         try:
             response = client.generate_response(prompt, max_tokens=800, temperature=0.1)
@@ -315,9 +338,11 @@ AUTH COMPONENTS: {[comp.get('name') for comp in auth_components]}
 TOTAL COMPONENTS: {len(components)}
 
 Generate JSON with authentication flow threats:
-{{"threats": [{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "threat_description", "likelihood": "High/Medium/Low", "impact": "impact_description", "flow_type": "authentication"}}]}}
+{{"threats": [{{"name": "threat_name", "severity": "Critical/High/Medium/Low", "description": "threat_description", "likelihood": "High/Medium/Low", "impact": "impact_description", "flow_type": "authentication", "probability_score": 85}}]}}
 
-Focus on: token theft, session hijacking, authentication bypass, privilege escalation, credential stuffing, OIDC vulnerabilities. Max 4 threats."""
+probability_score (0-100): How likely is this authentication threat to be ACTUALLY PRESENT in this specific system? Consider: auth components found, deployment context, flow complexity.
+
+Focus on: token theft, session hijacking, authentication bypass, privilege escalation, credential stuffing, OIDC vulnerabilities."""
 
     threats = []
     try:
@@ -388,6 +413,7 @@ def _analyze_dataflows_simple(dfd_model, components: List[Dict]) -> Dict[str, An
             'id': 'CROSS-TRUST-001',
             'name': 'Trust Boundary Data Leakage',
             'severity': 'High',
+            'probability_score': 75,  # High likelihood for trust boundary issues
             'description': 'Data flowing across trust boundaries may be intercepted or modified',
             'threat_type': 'cross_component',
             'boundary_crossing': True,
@@ -403,6 +429,7 @@ def _analyze_dataflows_simple(dfd_model, components: List[Dict]) -> Dict[str, An
             'id': 'INTEG-AI-001',
             'name': 'AI-Traditional Integration Risk',
             'severity': 'Medium',
+            'probability_score': 60,  # Medium likelihood for integration issues
             'description': 'Integration between AI and traditional components may introduce vulnerabilities',
             'threat_type': 'ai_integration',
             'source': 'simple_analysis'

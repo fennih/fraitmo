@@ -1,4 +1,6 @@
-# LangGraph Pipeline Definition - Defines nodes, edges, and execution flow for threat analysis
+"""
+LangGraph-based pipeline for FRAITMO threat analysis
+"""
 
 import os
 import json
@@ -8,8 +10,10 @@ from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from rich.console import Console
 from rich.text import Text
+
+# Import console from utils
+from utils.console import console
 
 from pipeline.state import ThreatAnalysisState
 from pipeline.nodes.ai_detector import ai_component_detector_node
@@ -25,102 +29,92 @@ from dfd_parser.xml_parser import extract_from_xml
 from models.schema import DataFlowDiagram
 from models.builder import build_dfd_from_parser
 
-console = Console()
 
-def dfd_parser_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse DFD XML file and extract components"""
+def dfd_parser_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+    """DFD Parser Node: Parse DFD XML and extract components"""
     console.print(Text("[INFO]", style="bold blue"), "DFD Parser Node: Parsing DFD XML...")
 
-    dfd_file = state.get('dfd_xml_path')
-    if not dfd_file:
-        error_msg = "No DFD file specified"
-        console.print(Text("[ERROR]", style="bold red"), error_msg)
-        return {"errors": [error_msg]}
+    # Report start of parsing - REALISTIC percentages for fast operations
+    if progress_callback:
+        progress_callback(2, "📄 Reading DFD file...")
 
     try:
-        # Parse the DFD XML file
-        parsed_data = extract_from_xml(dfd_file)
+        dfd_xml_path = state.get("dfd_xml_path")
+
+        # Read the DFD file content for storage
+        with open(dfd_xml_path, 'r', encoding='utf-8') as file:
+            dfd_content = file.read()
+
+        if progress_callback:
+            progress_callback(4, "📄 Parsing DFD structure...")
+
+        # Parse the DFD using the file path (not content)
+        parsed_data = extract_from_xml(dfd_xml_path)
 
         if not parsed_data:
-            error_msg = "Failed to parse DFD file"
-            console.print(Text("[ERROR]", style="bold red"), error_msg)
-            return {"errors": [error_msg]}
+            return {"errors": ["Failed to parse DFD XML"]}
+
+        if progress_callback:
+            progress_callback(6, f"📄 DFD parsed: {len(parsed_data.get('components', {}))} components")
 
         console.print(Text("[OK]", style="bold green"), "DFD Parsed:")
         console.print(Text("[INFO]", style="bold blue"), f"Components: {len(parsed_data.get('components', {}))}")
         console.print(Text("[INFO]", style="bold blue"), f"Connections: {len(parsed_data.get('connections', []))}")
         console.print(Text("[INFO]", style="bold blue"), f"Trust boundaries: {len(parsed_data.get('trust_boundaries', []))}")
 
-        # Return only the field we're modifying
-        return {"parsed_data": parsed_data}
+        return {
+            "dfd_content": dfd_content,
+            "parsed_data": parsed_data
+        }
 
     except Exception as e:
-        error_msg = f"DFD Parser Error: {e}"
-        console.print(Text("[ERROR]", style="bold red"), error_msg)
-        state['errors'] = state.get('errors', []) + [error_msg]
-        return state
-
-
-def semantic_modeling_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Build semantic model from parsed DFD data"""
-    console.print(Text("[INFO]", style="bold blue"), "Semantic Modeling Node: Building semantic model...")
-
-    parsed_data = state.get('parsed_data')
-    if not parsed_data:
-        error_msg = "No parsed DFD data available"
+        error_msg = f"DFD Parser failed: {str(e)}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
         return {"errors": [error_msg]}
 
+
+def semantic_modeling_node(state: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+    """Semantic Modeling Node: Build semantic model from parsed data"""
+    console.print(Text("[INFO]", style="bold blue"), "Semantic Modeling Node: Building semantic model...")
+
+    if progress_callback:
+        progress_callback(8, "🏗️ Building semantic model...")
+
     try:
-        # Build semantic model
+        parsed_data = state.get("parsed_data")
+        if not parsed_data:
+            return {"errors": ["No parsed data available for semantic modeling"]}
+
+        # Build the DFD model
         dfd_model = build_dfd_from_parser(parsed_data)
 
         if not dfd_model:
-            error_msg = "Failed to build semantic model"
-            console.print(Text("[ERROR]", style="bold red"), error_msg)
-            return {"errors": [error_msg]}
+            return {"errors": ["Failed to build semantic model"]}
 
         console.print(Text("[OK]", style="bold green"), "Semantic Model Built:")
         console.print(Text("[INFO]", style="bold blue"), f"Components: {len(dfd_model.components)}")
         console.print(Text("[INFO]", style="bold blue"), f"Trust zones: {len(dfd_model.trust_zones)}")
         console.print(Text("[INFO]", style="bold blue"), f"Connections: {len(dfd_model.connections)}")
 
-        # Return only the field we're modifying
-        return {"dfd_model": dfd_model}
+        return {
+            "dfd_model": dfd_model
+        }
 
     except Exception as e:
-        error_msg = f"Semantic Modeling Error: {e}"
+        error_msg = f"Semantic modeling failed: {str(e)}"
         console.print(Text("[ERROR]", style="bold red"), error_msg)
         return {"errors": [error_msg]}
 
 
-def assess_risk_level(threats):
-    """Simple risk level assessment based on threat severity"""
-    if not threats:
-        return "low"
-
-    critical_count = len([t for t in threats if t.get('severity', '').lower() == 'critical'])
-    high_count = len([t for t in threats if t.get('severity', '').lower() == 'high'])
-
-    if critical_count > 0:
-        return "critical"
-    elif high_count > 2:
-        return "high"
-    elif high_count > 0:
-        return "medium"
-    else:
-        return "low"
-
-
-def create_fraitmo_graph(skip_mitigation: bool = False):
+def create_graph(skip_mitigation: bool = False, progress_callback=None) -> StateGraph:
     """
-    Create the complete FRAITMO threat analysis graph
+    Create and configure the LangGraph pipeline
 
     Args:
-        skip_mitigation: If True, skip mitigation generation for faster execution
+        skip_mitigation: If True, skip mitigation generation nodes
 
     Returns:
-        Compiled LangGraph application
+        Compiled StateGraph ready for execution
     """
     # Load environment variables
     load_dotenv()
@@ -130,17 +124,17 @@ def create_fraitmo_graph(skip_mitigation: bool = False):
     # Create the graph
     workflow = StateGraph(ThreatAnalysisState)
 
-    # Add nodes in the order of execution
-    workflow.add_node("dfd_parser", dfd_parser_node)
-    workflow.add_node("semantic_modeling", semantic_modeling_node)
-    workflow.add_node("ai_detector", ai_component_detector_node)
-    workflow.add_node("kb_router", kb_router_node)
-    workflow.add_node("rag_threat_search", rag_threat_searcher_node)
-    workflow.add_node("llm_analyzer", llm_analyzer_node)
-    workflow.add_node("cross_component_analyzer", cross_component_analyzer_node)  # New node
-    workflow.add_node("rag_mitigation_proposer", rag_mitigation_proposer_node)
-    workflow.add_node("llm_mitigation_proposer", llm_mitigation_proposer_node)
-    workflow.add_node("quality_filter", llm_quality_filter_node)
+    # Add nodes with progress callback support for REAL-TIME progress reporting
+    workflow.add_node("dfd_parser", lambda state: dfd_parser_node(state, progress_callback))
+    workflow.add_node("semantic_modeling", lambda state: semantic_modeling_node(state, progress_callback))
+    workflow.add_node("ai_detector", lambda state: ai_component_detector_node(state, progress_callback))
+    workflow.add_node("kb_router", lambda state: kb_router_node(state, progress_callback))
+    workflow.add_node("rag_threat_search", lambda state: rag_threat_searcher_node(state, progress_callback))
+    workflow.add_node("llm_analyzer", lambda state: llm_analyzer_node(state, progress_callback))
+    workflow.add_node("cross_component_analyzer", lambda state: cross_component_analyzer_node(state, progress_callback))
+    workflow.add_node("rag_mitigation_proposer", lambda state: rag_mitigation_proposer_node(state, progress_callback))
+    workflow.add_node("llm_mitigation_proposer", lambda state: llm_mitigation_proposer_node(state, progress_callback))
+    workflow.add_node("quality_filter", lambda state: llm_quality_filter_node(state, progress_callback))
 
     # Set entry point
     workflow.set_entry_point("dfd_parser")
@@ -150,8 +144,6 @@ def create_fraitmo_graph(skip_mitigation: bool = False):
     workflow.add_edge("semantic_modeling", "ai_detector")
     workflow.add_edge("ai_detector", "kb_router")
     workflow.add_edge("kb_router", "rag_threat_search")
-    # Remove the redundant llm_analysis edge that causes context overflow
-    # workflow.add_edge("rag_threat_search", "llm_analysis")
 
     # Add parallel LLM analysis after ai_detector
     workflow.add_edge("ai_detector", "llm_analyzer")
@@ -174,199 +166,173 @@ def create_fraitmo_graph(skip_mitigation: bool = False):
         workflow.add_edge("llm_mitigation_proposer", "quality_filter")
         console.print(Text("[INFO]", style="bold blue"), "Full analysis mode - threats and mitigations")
 
-    # Quality filter is the final step before ending
+    # End after quality filter
     workflow.add_edge("quality_filter", END)
 
-    # Compile with memory saver for state persistence
-    checkpointer = MemorySaver()
-    app = workflow.compile(checkpointer=checkpointer)
+    # Compile the graph
+    memory = MemorySaver()
+    app = workflow.compile(checkpointer=memory)
 
-    console.print(Text("[OK]", style="bold green"), "FRAITMO LangGraph pipeline created successfully!")
+    console.print(Text("[OK]", style="bold green"), "FRAITMO LangGraph pipeline created successfully")
 
     return app
 
 
-def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None, skip_mitigation: bool = False):
+def run_fraitmo_analysis(dfd_xml_path: str, config: Dict[str, Any] = None, skip_mitigation: bool = False, verbose: bool = False, quiet: bool = False):
     """
-    Run complete FRAITMO threat analysis
+    Run the complete FRAITMO analysis using LangGraph
 
     Args:
-        dfd_xml_path: Path to DFD XML file
-        config: Optional configuration for the graph execution
-        skip_mitigation: If True, skip mitigation generation for faster execution
+        dfd_xml_path: Path to the DFD XML file
+        config: Optional configuration dictionary
+        skip_mitigation: Skip mitigation generation if True
+        verbose: Enable verbose output
+        quiet: Enable quiet mode
+
+    Returns:
+        Dict containing analysis results
     """
+    # Configure global console for pipeline
     console.print(Text("[INFO]", style="bold blue"), "Starting FRAITMO LangGraph Threat Analysis")
     console.print("=" * 60)
 
-    # Create the graph
-    app = create_fraitmo_graph(skip_mitigation=skip_mitigation)
-
-    # Initial state with all required fields
-    initial_state = ThreatAnalysisState(
-        dfd_xml_path=dfd_xml_path,
-        dfd_content=None,
-        dfd_model=None,
-        parsed_data=None,
-        ai_components=[],
-        traditional_components=[],
-        component_classification={},
-        ai_knowledge_base=[],
-        general_knowledge_base=[],
-        routing_strategy=[],
-        threats_found=[],
-        ai_threats=[],
-        traditional_threats=[],
-        cross_zone_threats=[],
-        llm_threats=[],
-        llm_analysis_summary={},
-        cross_component_threats=[],  # New field
-        trust_boundary_count=0,      # New field
-        data_flow_count=0,          # New field
-        threat_analysis={},
-        risk_assessment={},
-        rag_mitigations=[],
-        rag_implementation_plan={},
-        llm_mitigations=[],
-        llm_implementation_plan={},
-        llm_mitigation_summary={},
-        implementation_tracker={},
-        filtered_threats=[],
-        filtered_mitigations=[],
-        threat_mitigation_mapping={},
-        quality_filter_applied=False,
-        processing_status="started",
-        llm_analysis_status="pending",
-        llm_mitigation_status="pending",
-        current_node="initializing",
-        errors=[],
-        warnings=[],
-        skip_mitigation=skip_mitigation
-    )
-
-    # Configure execution
-    if config is None:
-        config = {"configurable": {"thread_id": "fraitmo-analysis-1"}}
-
     try:
-        # Execute the graph
+        # Create the graph
+        app = create_graph(skip_mitigation=skip_mitigation)
+
         console.print(Text("[INFO]", style="bold blue"), "Executing LangGraph pipeline...")
+
+        # Initial state with all required fields
+        initial_state = ThreatAnalysisState(
+            dfd_xml_path=dfd_xml_path,
+            dfd_content=None,
+            parsed_data=None,
+            dfd_model=None,
+            ai_components=[],
+            traditional_components=[],
+            component_classification={},
+            ai_knowledge_base=[],
+            general_knowledge_base=[],
+            routing_strategy=[],
+            threats_found=[],
+            ai_threats=[],
+            traditional_threats=[],
+            cross_zone_threats=[],
+            llm_threats=[],
+            llm_analysis_summary={},
+            cross_component_threats=[],
+            trust_boundary_count=0,
+            data_flow_count=0,
+            threat_analysis={},
+            risk_assessment={},
+            rag_mitigations=[],
+            rag_implementation_plan={},
+            llm_mitigations=[],
+            llm_implementation_plan={},
+            llm_mitigation_summary={},
+            implementation_tracker={},
+            filtered_threats=[],
+            filtered_mitigations=[],
+            threat_mitigation_mapping={},
+            quality_filter_applied=False,
+            processing_status="starting",
+            llm_analysis_status="pending",
+            llm_mitigation_status="pending",
+            current_node="start",
+            errors=[],
+            warnings=[],
+            skip_mitigation=skip_mitigation
+        )
+
+        # Execute the pipeline
+        config = config or {"configurable": {"thread_id": "fraitmo-analysis"}}
         result = app.invoke(initial_state, config=config)
 
-        console.print(Text("[OK]", style="bold green"), "FRAITMO Analysis Complete!")
-        console.print("=" * 60)
+        if result:
+            console.print(Text("[OK]", style="bold green"), "LangGraph execution completed successfully")
 
-        # Calculate and add overall risk to result before displaying summary
-        overall_risk = _calculate_overall_risk(result)
-        result['overall_risk'] = overall_risk
+            # Process and summarize results
+            console.print("=" * 60)
+            console.print(Text("[INFO]", style="bold blue"), "ANALYSIS SUMMARY:")
+            console.print("=" * 60)
+            console.print(Text("[INFO]", style="bold blue"), f"AI Components: {len(result.get('ai_components', []))}")
+            console.print(Text("[INFO]", style="bold blue"), f"Traditional Components: {len(result.get('traditional_components', []))}")
 
-        # Display summary
-        display_analysis_summary(result)
+            # Count threats
+            total_threats = 0
+            filtered_threats = 0
+            rag_threats = len(result.get('rag_threats', []))
+            llm_threats = len(result.get('llm_threats', []))
+            cross_component_threats = len(result.get('cross_component_threats', []))
+            final_threats = len(result.get('final_threats', []))
 
-        return result
+            total_threats = rag_threats + llm_threats + cross_component_threats
+            filtered_threats = final_threats
 
-    except Exception as e:
-        console.print(Text("[ERROR]", style="bold red"), f"FRAITMO Analysis Failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+            console.print(Text("[INFO]", style="bold blue"), f"Threats: {total_threats} → {filtered_threats} (after deduplication)")
 
+            # Count mitigations if generated
+            if not skip_mitigation:
+                total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
+                filtered_mitigations = len(result.get('final_mitigations', []))
+                console.print(Text("[INFO]", style="bold blue"), f"Mitigations: {total_mitigations} → {filtered_mitigations} (relevant only)")
 
-def display_analysis_summary(result):
-    """Display a summary of the analysis results"""
-    console.print(Text("[INFO]", style="bold blue"), "ANALYSIS SUMMARY:")
-    console.print(f"Status: {result.get('processing_status', 'unknown')}")
-    console.print(Text("[INFO]", style="bold blue"), f"AI Components: {len(result.get('ai_components', []))}")
-    console.print(Text("[INFO]", style="bold blue"), f"Traditional Components: {len(result.get('traditional_components', []))}")
-
-    # Check if we're in threats-only mode
-    skip_mitigation = result.get('skip_mitigation', False)
-
-    # Show quality filtering results if applied
-    if result.get('quality_filter_applied', False):
-        console.print(Text("[OK]", style="bold green"), "🔍 LLM Quality Filter Applied")
-
-        # Original counts
-        total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
-        total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
-
-        # Filtered counts
-        filtered_threats = len(result.get('filtered_threats', []))
-        filtered_mitigations = len(result.get('filtered_mitigations', []))
-
-        console.print(Text("[INFO]", style="bold blue"), f"Threats: {total_threats} → {filtered_threats} (after deduplication)")
-
-        # Only show mitigation stats if we're not in threats-only mode
-        if not skip_mitigation:
-            console.print(Text("[INFO]", style="bold blue"), f"Mitigations: {total_mitigations} → {filtered_mitigations} (relevant only)")
-
-            # Show threat-mitigation mapping stats only if we have mitigations
-            mapping_count = len(result.get('threat_mitigation_mapping', {}))
-            if mapping_count > 0:
+                # Count threat-mitigation mappings
+                mapping_count = len(result.get('threat_mitigation_mappings', []))
                 console.print(Text("[INFO]", style="bold blue"), f"Threat-Mitigation Mappings: {mapping_count}")
 
-    else:
-        # Fallback to original counts
-        total_threats = len(result.get('threats_found', [])) + len(result.get('llm_threats', []))
-        total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
+            # Show final counts
+            console.print("=" * 60)
+            console.print(Text("[INFO]", style="bold blue"), f"Total Threats Found: {total_threats}")
 
-        console.print(Text("[WARN]", style="bold yellow"), "Quality Filter Not Applied")
-        console.print(Text("[INFO]", style="bold blue"), f"Total Threats Found: {total_threats}")
-        console.print(f"  RAG Path: {len(result.get('threats_found', []))}")
-        console.print(f"  LLM Path: {len(result.get('llm_threats', []))}")
+            if not skip_mitigation:
+                total_mitigations = len(result.get('rag_mitigations', [])) + len(result.get('llm_mitigations', []))
+                console.print(Text("[INFO]", style="bold blue"), f"Total Mitigations: {total_mitigations}")
 
-        # Only show mitigation stats if we're not in threats-only mode
-        if not skip_mitigation:
-            console.print(Text("[INFO]", style="bold blue"), f"Total Mitigations: {total_mitigations}")
-            console.print(f"  RAG Path: {len(result.get('rag_mitigations', []))}")
-            console.print(f"  LLM Path: {len(result.get('llm_mitigations', []))}")
+            # Risk assessment if available
+            risk_assessment = result.get('risk_assessment', {})
+            if risk_assessment:
+                overall_risk = risk_assessment.get('overall_risk', 'Unknown')
+                console.print(Text("[INFO]", style="bold blue"), f"Overall Risk: {overall_risk}")
 
-    # Calculate and show overall risk
-    overall_risk = _calculate_overall_risk(result)
-    console.print(Text("[INFO]", style="bold blue"), f"Overall Risk: {overall_risk}")
+            return result
+        else:
+            console.print(Text("[ERROR]", style="bold red"), "LangGraph execution failed - no results returned")
+            return {"errors": ["Pipeline execution failed"]}
 
-    if result.get('errors'):
-        console.print(Text("[ERROR]", style="bold red"), f"Errors: {len(result.get('errors', []))}")
-        for error in result.get('errors', []):
-            console.print(f"  - {error}")
+    except Exception as e:
+        error_msg = f"FRAITMO analysis failed: {str(e)}"
+        console.print(Text("[ERROR]", style="bold red"), error_msg)
 
-def _calculate_overall_risk(result: Dict[str, Any]) -> str:
-    """Calculate overall risk based on threat severity distribution"""
+        if verbose:
+            import traceback
+            traceback.print_exc()
 
-    # Get threats from filtered results if available, otherwise from original
-    if result.get('quality_filter_applied', False):
-        threats = result.get('filtered_threats', [])
-    else:
-        threats = result.get('threats_found', []) + result.get('llm_threats', [])
-
-    if not threats:
-        return "Unknown (No threats identified)"
-
-    # Count threats by severity
-    critical_count = sum(1 for t in threats if t.get('severity', '').lower() == 'critical')
-    high_count = sum(1 for t in threats if t.get('severity', '').lower() == 'high')
-    medium_count = sum(1 for t in threats if t.get('severity', '').lower() == 'medium')
-    low_count = sum(1 for t in threats if t.get('severity', '').lower() == 'low')
-
-    total_threats = len(threats)
-
-    # Risk calculation logic
-    if critical_count >= 3 or (critical_count >= 1 and high_count >= 5):
-        return f"Critical ({critical_count} critical, {high_count} high threats)"
-    elif critical_count >= 1 or high_count >= 3:
-        return f"High ({critical_count} critical, {high_count} high threats)"
-    elif high_count >= 1 or medium_count >= 5:
-        return f"Medium ({high_count} high, {medium_count} medium threats)"
-    elif medium_count >= 1 or total_threats >= 3:
-        return f"Low ({medium_count} medium, {total_threats} total threats)"
-    else:
-        return f"Minimal ({total_threats} threats identified)"
+        return {"errors": [error_msg]}
 
 
+# Test execution
 if __name__ == "__main__":
-    # Test the pipeline
     import sys
-    if len(sys.argv) > 1:
-        dfd_path = sys.argv[1]
-        run_fraitmo_analysis(dfd_path)
-    else:
+
+    if len(sys.argv) < 2:
+        console.print(Text("[ERROR]", style="bold red"), "Usage: python pipeline/graph.py <path_to_dfd.xml>")
         console.print(Text("[INFO]", style="bold blue"), "Usage: python pipeline/graph.py <path_to_dfd.xml>")
+        sys.exit(1)
+
+    dfd_path = sys.argv[1]
+    if not os.path.exists(dfd_path):
+        console.print(Text("[ERROR]", style="bold red"), f"DFD file not found: {dfd_path}")
+        sys.exit(1)
+
+    # Run analysis
+    result = run_fraitmo_analysis(dfd_path, skip_mitigation=True)
+
+    if result and "errors" not in result:
+        console.print(Text("[OK]", style="bold green"), "Analysis completed successfully!")
+    else:
+        console.print(Text("[ERROR]", style="bold red"), "Analysis failed!")
+        if result and "errors" in result:
+            for error in result["errors"]:
+                console.print(f"  - {error}")
+        sys.exit(1)
