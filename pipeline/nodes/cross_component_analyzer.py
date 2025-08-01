@@ -52,25 +52,79 @@ def cross_component_analyzer_node(state: Dict[str, Any], progress_callback=None)
                 "errors": [error_msg]
             }
 
-        # Analyze data flows between components
+        # **PARALLEL OPTIMIZATION**: Analyze data flows in parallel
         cross_threats = []
         skip_mitigation = state.get('skip_mitigation', False)
-
-        # 1. Analyze trust boundary crossings
-        trust_boundary_threats = _analyze_trust_boundaries(client, dfd_model, all_components, skip_mitigation)
-        cross_threats.extend(trust_boundary_threats)
-
-        # 2. Analyze AI-to-traditional component flows
-        ai_integration_threats = _analyze_ai_integration_flows(client, ai_components, traditional_components, dfd_model, skip_mitigation)
-        cross_threats.extend(ai_integration_threats)
-
-        # 3. Analyze external service dependencies
-        external_dependency_threats = _analyze_external_dependencies(client, all_components, dfd_model, skip_mitigation)
-        cross_threats.extend(external_dependency_threats)
-
-        # 4. Analyze authentication/authorization flows
-        auth_flow_threats = _analyze_authentication_flows(client, all_components, dfd_model, skip_mitigation)
-        cross_threats.extend(auth_flow_threats)
+        
+        # Import parallel analyzer
+        from pipeline.performance.parallel_analyzer import ParallelThreatAnalyzer
+        
+        with ParallelThreatAnalyzer(max_workers=3) as parallel_analyzer:  # Fewer workers for cross-analysis
+            
+            console.print(Text("[PERF]", style="bold cyan"), "🚀 Starting parallel cross-component analysis...")
+            
+            # Create analysis tasks that can run in parallel
+            analysis_tasks = []
+            
+            # Task 1: Trust boundary analysis
+            if hasattr(dfd_model, 'connections') and dfd_model.connections:
+                analysis_tasks.append({
+                    'type': 'trust_boundaries',
+                    'function': lambda: _analyze_trust_boundaries(client, dfd_model, all_components, skip_mitigation),
+                    'name': 'Trust Boundaries'
+                })
+            
+            # Task 2: AI integration analysis  
+            if ai_components and traditional_components:
+                analysis_tasks.append({
+                    'type': 'ai_integration',
+                    'function': lambda: _analyze_ai_integration_flows(client, ai_components, traditional_components, dfd_model, skip_mitigation),
+                    'name': 'AI Integration'
+                })
+            
+            # Task 3: External dependencies (if any external components detected)
+            external_components = [c for c in all_components if any(ext in c.get('name', '').lower() for ext in ['openai', 'aws', 'external', 'api'])]
+            if external_components:
+                analysis_tasks.append({
+                    'type': 'external_deps',
+                    'function': lambda: _analyze_external_dependencies(client, all_components, dfd_model, skip_mitigation),
+                    'name': 'External Dependencies'
+                })
+            
+            # Task 4: Auth flows (if auth components detected)
+            auth_components = [c for c in all_components if any(auth in c.get('name', '').lower() or auth in c.get('type', '').lower() 
+                                                               for auth in ['auth', 'login', 'oauth', 'jwt', 'token'])]
+            if auth_components:
+                analysis_tasks.append({
+                    'type': 'auth_flows', 
+                    'function': lambda: _analyze_authentication_flows(client, all_components, dfd_model, skip_mitigation),
+                    'name': 'Auth Flows'
+                })
+            
+            # Execute analysis tasks in parallel
+            if analysis_tasks:
+                import concurrent.futures
+                
+                console.print_debug(Text("[PERF]", style="dim cyan"), f"Executing {len(analysis_tasks)} cross-component analysis tasks in parallel...")
+                
+                futures = []
+                for task in analysis_tasks:
+                    future = parallel_analyzer.executor.submit(task['function'])
+                    futures.append((future, task['name']))
+                
+                # Collect results
+                for future, task_name in futures:
+                    try:
+                        threats = future.result(timeout=120)  # 2 minute timeout per cross-analysis
+                        cross_threats.extend(threats)
+                        console.print_debug(Text("[PERF]", style="dim green"), f"✅ {task_name}: {len(threats)} threats")
+                        
+                    except concurrent.futures.TimeoutError:
+                        console.print(Text("[WARN]", style="bold yellow"), f"⏱️ {task_name} analysis timeout - skipping")
+                    except Exception as e:
+                        console.print(Text("[WARN]", style="bold yellow"), f"❌ {task_name} analysis failed: {e}")
+            else:
+                console.print(Text("[INFO]", style="bold blue"), "No cross-component analysis tasks needed")
 
         console.print(Text("[OK]", style="bold green"), f"Cross-component analysis complete: {len(cross_threats)} flow-based threats identified")
 
@@ -141,28 +195,79 @@ def _analyze_trust_boundary_crossing(client, source_comp: Dict, target_comp: Dic
     source_zone = source_comp.get('trust_zone', 'unknown')
     target_zone = target_comp.get('trust_zone', 'unknown')
 
-    # Create context-aware prompt for boundary crossing analysis
-    prompt = f"""Analyze trust boundary crossing security threats:
+    # Enhanced trust boundary analysis with compliance context
+    prompt = f"""TRUST BOUNDARY CROSSING SECURITY ANALYSIS
 
-SOURCE: {source_name} (Trust Zone: {source_zone})
-TARGET: {target_name} (Trust Zone: {target_zone})
-DATA FLOW: {source_name} → {target_name}
+DATA FLOW PROFILE:
+- SOURCE: {source_name} (Trust Zone: {source_zone})
+- TARGET: {target_name} (Trust Zone: {target_zone})
+- FLOW TYPE: Trust Boundary Crossing
+- SECURITY CONTEXT: Inter-Zone Communication
 
-Generate JSON with specific, descriptive threat names (NOT generic categories):
+TRUST BOUNDARY THREAT FRAMEWORK:
+1. **AUTHENTICATION THREATS**
+   - Missing mutual authentication
+   - Weak credential validation
+   - Session hijacking across zones
 
-{{"threats": [{{"name": "specific_descriptive_threat_name", "severity": "Critical/High/Medium/Low", "description": "detailed_threat_description", "likelihood": "High/Medium/Low", "impact": "specific_impact_description", "boundary_type": "trust_boundary_crossing", "probability_score": 85}}]}}
+2. **AUTHORIZATION THREATS**
+   - Privilege escalation across boundaries
+   - Access control bypass
+   - Resource authorization failures
 
-probability_score (0-100): How likely is this trust boundary threat to be ACTUALLY PRESENT in this specific data flow? Consider: component types, trust zone separation, connection security.
+3. **DATA INTEGRITY THREATS**
+   - Man-in-the-middle attacks
+   - Data tampering in transit
+   - Message replay attacks
 
-EXAMPLES of good names:
-- "Unencrypted Redis Cache Data in Transit to ECS"
-- "Missing Authentication Between Load Balancer and Backend"
-- "Man-in-the-Middle Attack on API Gateway Communications"
+4. **CONFIDENTIALITY THREATS**
+   - Unencrypted data transmission
+   - Cryptographic weaknesses
+   - Key management failures
 
-Focus on specific technical vulnerabilities: data integrity, authentication gaps, authorization bypasses, encryption weaknesses, man-in-the-middle attacks, privilege escalation across zones."""
+COMPLIANCE CONSIDERATIONS:
+- Zero Trust Architecture principles
+- Network segmentation requirements (PCI-DSS, SOC 2)
+- Data protection in transit (GDPR, HIPAA)
+- Cryptographic standards (FIPS 140-2, Common Criteria)
+
+OUTPUT FORMAT:
+{{"threats": [{{"id": "TB-{source_name}-{target_name}-001", "name": "Specific boundary crossing threat with technical detail", "threat_category": "Authentication|Authorization|Data Integrity|Confidentiality", "severity": "Critical|High|Medium|Low", "description": "Detailed technical description of boundary threat", "attack_vector": "Cross-zone attack method", "impact": "Business and security impact", "likelihood": "High|Medium|Low", "probability_score": 85, "boundary_type": "trust_boundary_crossing", "compliance_impact": "PCI-DSS|SOC2|GDPR|HIPAA", "zone_risk": "high|medium|low", "prerequisites": ["Network access requirements"], "indicators": ["Network-level detection indicators"]}}]}}
+
+EXAMPLES OF EXCELLENT BOUNDARY THREAT NAMES:
+- "Unencrypted Redis Cache Data Exposure in Transit to ECS (GDPR Violation)"
+- "Missing Mutual TLS Authentication Between Load Balancer and Backend (Zero Trust Failure)"
+- "Man-in-the-Middle Attack on API Gateway Communications via Certificate Spoofing"
+- "Cross-Zone Privilege Escalation via Weak Service Account Validation"
+- "Session Token Interception in DMZ to Internal Network Communication"
+
+COMPREHENSIVE TRUST BOUNDARY ANALYSIS:
+Generate ALL relevant trust boundary crossing threats for this data flow. Include complete coverage of:
+- All four threat categories (Authentication, Authorization, Data Integrity, Confidentiality)
+- Protocol-specific vulnerabilities (HTTP/HTTPS, TLS, API-specific)
+- Network-level and application-level boundary threats
+- Zone-specific security control failures
+- Cross-zone privilege escalation scenarios
+
+Trust boundary crossings typically expose 6-12+ distinct threat vectors. Provide thorough analysis:"""
 
     try:
-        response = client.generate_response(prompt, max_tokens=600, temperature=0.1)
+        # Dynamic token allocation for trust boundary complexity
+        boundary_complexity_factors = [
+            source_zone != target_zone,                    # Different trust zones
+            'external' in source_zone.lower(),            # External connections
+            'dmz' in (source_zone + target_zone).lower(), # DMZ involvement
+            'database' in (source_name + target_name).lower(), # Database connections
+            'api' in (source_name + target_name).lower(),      # API connections
+        ]
+        complexity_score = sum(boundary_complexity_factors)
+        
+        # Adaptive token allocation: 800-1400 tokens
+        max_tokens = 800 + (complexity_score * 120)
+        
+        console.print_debug(Text("[DEBUG]", style="dim"), f"Boundary complexity score: {complexity_score}/5, allocated tokens: {max_tokens}")
+        
+        response = client.generate_response(prompt, max_tokens=max_tokens, temperature=0.1)
 
         # Parse the response
         from pipeline.nodes.llm_analyzer import _parse_partial_json_threats

@@ -7,6 +7,7 @@ import os
 import json
 import time
 import requests
+import ollama
 from typing import List, Dict, Any, Optional, Tuple, Literal
 from dataclasses import dataclass
 from abc import ABC, abstractmethod

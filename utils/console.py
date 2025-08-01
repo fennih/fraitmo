@@ -37,7 +37,7 @@ class VerboseConsole:
 
                 # Only allow these FINAL result messages in normal mode
                 allowed_final_messages = [
-                    "[ERROR]",
+                    "[ERROR]",  # Always show errors
                     "[OK] FRAITMO Analysis Complete!",
                     "[INFO] Overall Risk:",
                     "[INFO] Total Threats Found:",
@@ -45,6 +45,28 @@ class VerboseConsole:
                     "[INFO] ANALYSIS SUMMARY:",
                     "[OK] FRAITMO THREAT ANALYSIS RESULTS"
                 ]
+                
+                # Block verbose-only messages in normal mode
+                verbose_only_messages = [
+                    "threat coverage:",
+                    "Coverage insufficient:",
+                    "complexity score:",
+                    "allocated tokens:",
+                    "Added",
+                    "additional",
+                    "Recovered",
+                    "threats from malformed",
+                    "Enhanced",
+                    "Deduplication",
+                    "Quality filter",
+                    "[DEBUG]",
+                    "[WARN]",  # Coverage warnings should be verbose-only
+                    "enhancement"
+                ]
+                
+                # Block verbose-only messages unless they're errors
+                if not "[ERROR]" in first_arg and any(msg in first_arg for msg in verbose_only_messages):
+                    return
 
                 # Block ALL other messages in normal mode
                 if any(msg in first_arg for msg in allowed_final_messages):
@@ -81,6 +103,31 @@ class VerboseConsole:
             self.progress.stop()
             self.progress = None
             self.current_task = None
+    
+    def print_verbose(self, *args, **kwargs):
+        """Print only if verbose mode is enabled"""
+        if self.verbose and not self.quiet:
+            self.console.print(*args, **kwargs)
+    
+    def print_debug(self, *args, **kwargs):
+        """Print debug messages only in verbose mode"""
+        if self.verbose and not self.quiet:
+            self.console.print(*args, **kwargs)
+    
+    def print_coverage(self, message_type: str, message: str):
+        """Print coverage validation messages only in verbose mode"""
+        if self.verbose and not self.quiet:
+            if message_type == "excellent":
+                self.console.print(Text("[OK]", style="bold green"), message)
+            elif message_type == "good":
+                self.console.print(Text("[OK]", style="bold blue"), message)
+            elif message_type == "acceptable":
+                self.console.print(Text("[INFO]", style="bold cyan"), message)
+            elif message_type == "low":
+                self.console.print(Text("[WARN]", style="bold yellow"), message)
+        # Always show critical coverage errors
+        elif message_type == "error":
+            self.console.print(Text("[ERROR]", style="bold red"), message)
 
 
 # Create a default console instance

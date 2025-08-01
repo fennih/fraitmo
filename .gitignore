@@ -151,3 +151,9 @@ knowledge_base_builder.py
 # Generated data directories
 vector_db/
 results/
+
+# Claude Code files
+CLAUDE.md
+.claude/
+claude-*
+*claude*

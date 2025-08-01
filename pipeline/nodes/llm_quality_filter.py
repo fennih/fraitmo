@@ -344,28 +344,71 @@ def _deduplicate_threats_with_llm(llm_client, threats: List[Dict]) -> List[Dict]
             }
             threat_summaries.append(summary)
 
-        # Simplified LLM deduplication prompt
-        dedup_prompt = f"""Remove duplicate threats for "{component}". Keep unique threat types.
+        # Enhanced semantic deduplication prompt
+        dedup_prompt = f"""INTELLIGENT THREAT DEDUPLICATION ANALYSIS
 
-THREATS: {json.dumps(threat_summaries[:10])}
+COMPONENT: {component}
+TOTAL THREATS: {len(component_threats)}
 
-Return indices of threats to KEEP (be permissive - only remove obvious duplicates):
-{{"keep": [0, 1, 3, 5, 7]}}"""
+DEDUPLICATION CRITERIA:
+1. **Semantic Similarity**: Same attack vector, different wording
+2. **Technical Overlap**: Same CWE/CVE reference, different descriptions  
+3. **Impact Equivalence**: Same business impact, different technical paths
+4. **Scope Redundancy**: Subset threats covered by broader threats
+
+THREATS TO ANALYZE:
+{json.dumps(threat_summaries[:10], indent=2)}
+
+ANALYSIS FRAMEWORK:
+- Group by attack vector families (SQL injection, XSS, etc.)
+- Identify parent-child relationships
+- Preserve unique technical variants
+- Maintain severity-based distinctions
+
+DECISION RULES:
+- Keep: Different attack vectors OR different business impacts
+- Merge: Same vector + same impact + same component
+- Elevate: Choose highest severity when merging
+- Preserve: All Critical/High severity threats
+
+OUTPUT FORMAT:
+{{"analysis": {{"keep_indices": [0, 1, 3, 5, 7], "merge_groups": [[2, 4], [6, 8]], "reasoning": ["Index 0: Unique SQL injection vector", "Indices 2,4: Merged - same XSS attack, kept higher severity"]}}}}
+
+Perform intelligent deduplication analysis:"""
 
         try:
-            response = llm_client.generate_response(dedup_prompt, max_tokens=150, temperature=0.0)
+            response = llm_client.generate_response(dedup_prompt, max_tokens=500, temperature=0.0)
 
-            # Parse LLM response
+            # Enhanced parsing for new response format
             try:
-                # Look for JSON in response
                 import re
-                json_match = re.search(r'\{[^{}]*\}', response)
+                # Look for nested JSON structure
+                json_match = re.search(r'\{[\s\S]*?\}', response)
                 if json_match:
                     parsed = json.loads(json_match.group(0))
-                    keep_indices = parsed.get('keep', parsed.get('unique_indices', []))
-
+                    
+                    # Extract analysis results
+                    analysis = parsed.get('analysis', {})
+                    keep_indices = analysis.get('keep_indices', [])
+                    merge_groups = analysis.get('merge_groups', [])
+                    reasoning = analysis.get('reasoning', [])
+                    
+                    # Log deduplication reasoning
+                    console.print(Text("[DEBUG]", style="dim"), f"Deduplication reasoning: {reasoning[:3]}")
+                    
                     # Validate indices
                     valid_indices = [i for i in keep_indices if 0 <= i < len(component_threats)]
+                    
+                    # Process merge groups - keep highest severity from each group
+                    for group in merge_groups:
+                        if len(group) > 1:
+                            # Find highest severity threat in group
+                            severity_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'unknown': 0}
+                            best_idx = max(group, key=lambda idx: severity_order.get(
+                                component_threats[idx].get('severity', 'unknown').lower(), 0
+                            ) if idx < len(component_threats) else 0)
+                            if best_idx not in valid_indices:
+                                valid_indices.append(best_idx)
 
                     if valid_indices and len(valid_indices) >= 3:  # Must keep at least 3
                         # Add selected unique threats

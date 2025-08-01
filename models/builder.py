@@ -171,11 +171,4 @@ def build_dfd_from_parser(parser_output: Dict[str, Any],
             .build(name=name, description=description))
 
 
-def analyze_security_boundaries(dfd: DataFlowDiagram) -> Dict[str, Any]:
-    """Analyze security boundaries of DFD"""
-    return {
-        "cross_zone_connections": len(dfd.cross_zone_connections),
-        "external_components": len(dfd.get_external_components()),
-        "aws_components": len(dfd.get_aws_components()),
-        "trust_zones": len(dfd.trust_zones)
-    }
+# Removed unused function analyze_security_boundaries - never called in codebase

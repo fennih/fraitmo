@@ -1,7 +1,7 @@
 # LangGraph State Schema - Defines the state structure for threat analysis pipeline
 
 from typing import Dict, List, Any, Optional, TypedDict, Annotated
-from typing_extensions import TypedDict
+# Removed redundant import - already imported from typing above
 import operator
 from models.schema import DataFlowDiagram
 

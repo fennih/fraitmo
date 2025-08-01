@@ -317,35 +317,52 @@ def _generate_contextual_threats(llm_client, component: Dict[str, Any], relevant
                 dfd_context = f"\nConnected to: {', '.join(set(connected_components))}"
 
         # Create prompt for LLM generation
-        prompt = f"""You are a cybersecurity expert analyzing a specific component in a system architecture.
+        prompt = f"""CYBERSECURITY EXPERT - RAG-ENHANCED THREAT ANALYSIS
 
-COMPONENT TO ANALYZE:
+COMPONENT PROFILE:
 - Name: {comp_name}
 - Type: {comp_type}
 - Description: {comp_description}
 - Category: {component_type.upper()} component{dfd_context}
 
-RELEVANT THREAT KNOWLEDGE:
+KNOWLEDGE BASE CONTEXT:
 {doc_context}
 
-TASK:
-Based on the provided threat knowledge and component details, generate all relevant specific, actionable security threats that could affect this component. Each threat should:
+THREAT MODELING FRAMEWORK:
+- Apply STRIDE methodology where applicable
+- Reference OWASP guidelines for web components
+- Use MITRE ATT&CK/ATLAS for AI components
+- Consider CWE common weakness patterns
+
+COMPLIANCE INTEGRATION:
+- Map threats to regulatory requirements (GDPR, SOC 2, PCI-DSS)
+- Consider industry-specific standards
+- Include data protection implications
+
+RAG ANALYSIS TASK:
+Based on the knowledge base evidence and component analysis, generate comprehensive, specific security threats. Each threat should:
 
 1. Be directly relevant to the component type and context
-2. Reference appropriate attack vectors from the knowledge base
-3. Include realistic impact assessment
-4. Be specific to this component (not generic)
-5. Include probability_score (0-100): How likely is this threat to be ACTUALLY PRESENT in this specific component? Consider: component type, configuration, connections, knowledge base evidence.
+2. Reference specific knowledge base evidence and attack vectors
+3. Include realistic business and technical impact assessment
+4. Be component-specific with technical implementation details
+5. Map to appropriate security frameworks (STRIDE, OWASP, CWE)
+6. Include compliance implications where relevant
+7. Provide probability scoring based on component exposure and KB evidence
 
-OUTPUT FORMAT (JSON):
+ENHANCED OUTPUT FORMAT (JSON):
 ```json
 [
   {{
-    "name": "Specific threat name",
+    "id": "RAG-{comp_name}-001",
+    "name": "Specific threat name with technical detail",
     "severity": "Critical|High|Medium|Low",
-    "description": "Detailed description of the threat",
-    "attack_vector": "How the attack could be executed",
-    "impact": "Potential business/technical impact",
+    "description": "Detailed technical description with KB references",
+    "attack_vector": "Step-by-step attack method from knowledge base",
+    "impact": "Business and technical impact assessment",
+    "kb_evidence": "Specific knowledge base source or pattern",
+    "framework_mapping": "STRIDE|OWASP|CWE reference",
+    "compliance_impact": "Regulatory implications (GDPR, PCI-DSS, etc.)",
     "likelihood": "High|Medium|Low",
     "probability_score": 85,
     "target_component": "{comp_name}",
