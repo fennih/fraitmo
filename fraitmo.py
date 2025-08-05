@@ -690,16 +690,36 @@ def _generate_mitigations_from_threats(threats):
         client = UnifiedLLMClient()
 
         for threat in threats:
-            prompt = f"""
-            Generate specific mitigation strategies for this security threat:
+            prompt = f"""# Security Threat Mitigation Strategy
 
-            Threat: {threat.get('name', 'Unknown')}
-            Description: {threat.get('description', 'No description')}
-            Severity: {threat.get('severity', 'Unknown')}
-            Component: {threat.get('component', 'Unknown')}
+## Threat Analysis Context
+- **Threat Name**: {threat.get('name', 'Unknown')}
+- **Description**: {threat.get('description', 'No description')}
+- **Severity Level**: {threat.get('severity', 'Unknown')}
+- **Target Component**: {threat.get('component', 'Unknown')}
 
-            Provide practical, actionable mitigation steps.
-            """
+## Mitigation Requirements
+Generate comprehensive, actionable security mitigations to address this specific threat.
+
+### Mitigation Strategy Framework:
+1. **Preventive Measures**: Controls to stop the threat from occurring
+2. **Detective Measures**: Controls to identify threat activity early
+3. **Corrective Measures**: Response and recovery procedures
+4. **Monitoring**: Ongoing surveillance and assessment
+
+### Implementation Guidelines:
+- **Immediate Actions**: Can be implemented within days/weeks
+- **Short-term Projects**: 1-3 months implementation timeline
+- **Long-term Initiatives**: Strategic security improvements
+
+### Required Output:
+Provide practical, actionable mitigation steps with:
+- Specific technical controls and configurations
+- Implementation priority and timeline
+- Resource requirements and dependencies
+- Success criteria and monitoring approaches
+
+Generate focused, implementable mitigation strategy:"""
 
             response = client.generate_response(prompt, max_tokens=300)
 

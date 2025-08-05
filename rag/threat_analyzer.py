@@ -84,25 +84,34 @@ class ThreatAnalyzer:
 
     def _get_llm_threat_analysis(self, component: Dict[str, Any], threat: Dict[str, Any]) -> str:
         """Get LLM analysis of threat relevance to component"""
-        prompt = f"""
-Analyze the relevance of this threat to the specific component:
+        prompt = f"""# Component-Specific Threat Relevance Analysis
 
-COMPONENT:
-- Name: {component.get('name', 'Unknown')}
-- Type: {component.get('type', 'Unknown')}
-- Description: {component.get('description', 'None')}
+## Target Component Context
+- **Name**: {component.get('name', 'Unknown')}
+- **Type**: {component.get('type', 'Unknown')}
+- **Description**: {component.get('description', 'None')}
 
-THREAT:
-- Name: {threat.get('name', 'Unknown')}
-- Category: {threat.get('category', 'Unknown')}
-- Description: {threat.get('description', 'None')}
-- Severity: {threat.get('severity', 'Unknown')}
+## Threat Assessment
+- **Threat Name**: {threat.get('name', 'Unknown')}
+- **Category**: {threat.get('category', 'Unknown')}
+- **Description**: {threat.get('description', 'None')}
+- **Severity**: {threat.get('severity', 'Unknown')}
 
-Provide a brief analysis (2-3 sentences) of:
-1. How this threat specifically applies to this component
-2. The likelihood and potential impact
-3. Key considerations for this scenario
-"""
+## Analysis Instructions
+Provide a concise technical assessment (2-3 sentences) covering:
+
+### Required Analysis Points:
+1. **Component Applicability**: How this threat specifically applies to this component type and configuration
+2. **Risk Assessment**: Likelihood of exploitation and potential business/technical impact
+3. **Context Considerations**: Key factors that increase or decrease threat relevance for this scenario
+
+### Analysis Focus:
+- Be specific to the component type and its role in the system
+- Consider actual attack vectors and exploitation scenarios
+- Factor in component exposure and protection mechanisms
+- Provide actionable insights for threat prioritization
+
+Generate a focused, technical analysis:"""
 
         return self.llm_client.generate_response(prompt, max_tokens=200, temperature=0.1)
 
@@ -179,18 +188,32 @@ Provide a brief analysis (2-3 sentences) of:
             # Add LLM analysis for connection threats
             if self.llm_client:
                 try:
-                    prompt = f"""
-Analyze this threat in the context of a data connection:
+                    prompt = f"""# Data Flow Connection Threat Analysis
 
-CONNECTION: {connection.source_id} -> {connection.target_id}
-Protocol: {connection.protocol}
-Data: {connection.label}
+## Connection Context
+- **Data Flow**: {connection.source_id} → {connection.target_id}
+- **Protocol**: {connection.protocol}
+- **Data Type**: {connection.label}
 
-THREAT: {threat.get('name', 'Unknown')}
-Description: {threat.get('description', 'None')}
+## Threat Assessment
+- **Threat Name**: {threat.get('name', 'Unknown')}
+- **Description**: {threat.get('description', 'None')}
 
-How does this threat apply to this specific data flow? (2-3 sentences)
-"""
+## Analysis Instructions
+Analyze how this threat specifically applies to this data connection (2-3 sentences):
+
+### Required Assessment:
+1. **Connection Vulnerability**: How the threat exploits this specific data flow
+2. **Protocol Risks**: Protocol-specific attack vectors and weaknesses
+3. **Data Exposure**: Risk to data confidentiality, integrity, or availability during transit
+
+### Analysis Focus:
+- Consider the specific protocol and its security characteristics
+- Factor in data sensitivity and exposure during transmission
+- Evaluate attack feasibility given the connection type
+- Provide concrete insights for this data flow scenario
+
+Generate focused connection-specific threat analysis:"""
                     enhanced_threat['rag_analysis'] = self.llm_client.generate_response(prompt, max_tokens=150)
                 except Exception as e:
                     console.print(Text("[WARN]", style="bold yellow"), f"RAG analysis failed for {threat.get('name', 'Unknown')}: {e}")
@@ -216,19 +239,38 @@ How does this threat apply to this specific data flow? (2-3 sentences)
             # LLM analysis for cross-zone threats
             if self.llm_client:
                 try:
-                    prompt = f"""
-Analyze this cross-trust-zone threat:
+                    prompt = f"""# Cross-Trust Zone Threat Analysis
 
-CROSS-ZONE CONNECTION: {connection_key}
-Source Zone: {connection_details.get('source_zone', 'Unknown')}
-Target Zone: {connection_details.get('target_zone', 'Unknown')}
-Protocol: {connection_details.get('protocol', 'Unknown')}
+## Trust Boundary Context
+- **Connection**: {connection_key}
+- **Source Zone**: {connection_details.get('source_zone', 'Unknown')}
+- **Target Zone**: {connection_details.get('target_zone', 'Unknown')}
+- **Protocol**: {connection_details.get('protocol', 'Unknown')}
 
-THREAT: {threat.get('name', 'Unknown')}
-Description: {threat.get('description', 'None')}
+## Threat Assessment
+- **Threat Name**: {threat.get('name', 'Unknown')}
+- **Description**: {threat.get('description', 'None')}
 
-What are the specific risks when this threat crosses trust boundaries? Include impact and likelihood.
-"""
+## Analysis Instructions
+Analyze the specific risks when this threat crosses trust boundaries:
+
+### Required Assessment:
+1. **Boundary Exploitation**: How the threat leverages trust zone differences
+2. **Escalation Potential**: Risk of privilege or access escalation across zones
+3. **Impact Amplification**: How crossing boundaries increases threat severity
+
+### Trust Boundary Considerations:
+- Different security controls between zones
+- Zone-specific access privileges and restrictions
+- Network segmentation and monitoring capabilities
+- Data sensitivity differences across zones
+
+### Risk Factors:
+- **Likelihood**: Probability of successful cross-zone exploitation
+- **Impact**: Business/technical consequences of boundary breach
+- **Detection**: Visibility and monitoring across zone boundaries
+
+Generate focused cross-zone threat analysis with specific risk assessment:"""
                     enhanced_threat['rag_analysis'] = self.llm_client.generate_response(prompt, max_tokens=200)
                 except Exception as e:
                     console.print(Text("[WARN]", style="bold yellow"), f"RAG analysis failed for connection threat: {e}")

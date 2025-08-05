@@ -345,12 +345,25 @@ def _deduplicate_threats_with_llm(llm_client, threats: List[Dict]) -> List[Dict]
             threat_summaries.append(summary)
 
         # Simplified LLM deduplication prompt
-        dedup_prompt = f"""Remove duplicate threats for "{component}". Keep unique threat types.
+        dedup_prompt = f"""# Threat Deduplication Analysis for Component: {component}
 
-THREATS: {json.dumps(threat_summaries[:10])}
+## Analysis Instructions
+Identify and remove obvious duplicate threats while preserving unique threat types and attack vectors.
 
-Return indices of threats to KEEP (be permissive - only remove obvious duplicates):
-{{"keep": [0, 1, 3, 5, 7]}}"""
+## Threat Summaries
+{json.dumps(threat_summaries[:10])}
+
+## Deduplication Guidelines
+- **Keep Unique**: Different attack methods, vectors, or target aspects
+- **Remove Duplicates**: Same threat with slightly different wording
+- **Be Permissive**: When in doubt, keep the threat (false positives better than false negatives)
+- **Preserve Diversity**: Maintain variety in threat types and severity levels
+
+## Required JSON Response
+Return indices of threats to KEEP:
+{{"keep": [0, 1, 3, 5, 7]}}
+
+Only remove threats that are clearly identical in attack method and target - preserve all others."""
 
         try:
             response = llm_client.generate_response(dedup_prompt, max_tokens=150, temperature=0.0)
@@ -688,15 +701,26 @@ def _assess_threat_applicability_relaxed(llm_client, threats: List[Dict], dfd_mo
         threat_names = [t.get('name', 'Unknown') for t in batch_threats]
 
         # Short and fast prompt
-        fast_prompt = f"""Quick threat relevance check for system with: {', '.join(tech_stack[:4])}
+        fast_prompt = f"""# Rapid Threat Relevance Assessment
 
-Threats: {', '.join(threat_names[:10])}
+## System Technology Stack
+{', '.join(tech_stack[:4])}
 
-Rate each threat 0-100% relevance to this system. BE VERY PERMISSIVE - only mark as irrelevant (<5%) if COMPLETELY unrelated to system type (e.g. iOS threats for web system).
+## Threats to Evaluate
+{', '.join(threat_names[:10])}
 
-Response format: {{"T1": 75, "T2": 20, "T3": 85}}
+## Relevance Scoring (0-100%)
+- **90-100%**: Directly applicable to identified technology stack
+- **70-89%**: Highly relevant to system type and components
+- **50-69%**: Generally applicable to this architecture pattern
+- **30-49%**: Somewhat relevant, could apply in specific contexts
+- **10-29%**: Limited relevance, edge case scenarios
+- **0-9%**: ONLY if completely unrelated platform/technology
 
-IMPORTANT: Most threats should score 30-90%. Only score <5% if threat is for completely different platform/technology."""
+## Required JSON Response
+{{"T1": 75, "T2": 20, "T3": 85}}
+
+**BE VERY PERMISSIVE**: Most threats should score 30-90%. Only score <5% for completely different platforms (e.g., iOS threats for web backend)."""
 
         try:
             # Faster LLM call with reduced tokens
@@ -825,20 +849,30 @@ def _assess_threat_applicability(llm_client, threats: List[Dict], dfd_model) -> 
             })
 
         # OPTIMIZED prompt - shorter and more focused
-        assessment_prompt = f"""ARCHITECTURE: {len(components)} components ({', '.join(component_types[:5])})
-TECH STACK: {', '.join(tech_stack[:4]) if tech_stack else 'Generic'}
+        assessment_prompt = f"""# Architecture-Specific Threat Relevance Assessment
 
-THREATS: {json.dumps(threat_analysis_list)}
+## System Architecture Context
+- **Components**: {len(components)} total ({', '.join(component_types[:5])})
+- **Technology Stack**: {', '.join(tech_stack[:4]) if tech_stack else 'Generic'}
 
-Rate each threat's relevance (0-100%) to THIS specific architecture. BE VERY PERMISSIVE:
-- 70-100%: Directly applies to identified components
-- 30-69%: Generally applies to this system type
-- 10-29%: Generic threat but could be relevant
-- 0-9%: ONLY if completely irrelevant (e.g. iOS threats for web backend)
+## Threats for Assessment
+{json.dumps(threat_analysis_list)}
 
-IMPORTANT: Most threats should score 30-90%. Only score <10% for completely different platforms.
+## Relevance Scoring Guidelines (0-100%)
+- **90-100%**: Critical threat directly targeting identified components
+- **70-89%**: High relevance to specific technology stack elements
+- **50-69%**: Generally applicable to this architecture pattern
+- **30-49%**: Somewhat relevant, could apply in certain deployment contexts
+- **10-29%**: Generic threat with limited applicability
+- **0-9%**: ONLY if completely irrelevant to platform/technology
 
-JSON format: {{"T1": {{"score": 75, "reason": "API endpoints present"}}, "T2": {{"score": 85, "reason": "Database systems detected"}}}}"""
+## Analysis Approach
+**BE VERY PERMISSIVE**: Err on side of inclusion rather than exclusion. Most threats should score 30-90%.
+
+## Required JSON Response Format
+{{"T1": {{"score": 75, "reason": "Direct API endpoint vulnerability"}}, "T2": {{"score": 85, "reason": "Database components present in stack"}}}}
+
+**Critical**: Only score <10% for completely different platforms (e.g., mobile threats for web-only systems)."""
 
         try:
             console.print(Text("[DEBUG]", style="dim"), f"Assessing batch {i//batch_size + 1}/{(len(threats) + batch_size - 1)//batch_size}")
